@@ -8,7 +8,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 
 ## 版本
 
-当前版本：`0.1.0`
+当前版本：`0.2.0`
 
 ## 功能
 
@@ -22,6 +22,11 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 - DLT_EN10MB 与 DLT_NULL/DLT_LOOP 链路格式
 - 每次捕获自动保存 pcap
 - 打开已有 `.pcap` 和 `.pcapng` 文件
+- 自动保存 pcapng，并可打开经典 pcap
+- DNS、IPv6 和增强 HTTP 字段分析
+- TCP 双向会话跟踪、乱序重组和 Follow Stream
+- 会话流量统计、实时包速率和吞吐量
+- 100,000 包 / 256 MB 的界面存储上限
 
 ## 系统要求
 
@@ -59,12 +64,21 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 6. 在“显示过滤”中输入条件并点击“应用过滤”，只改变已经捕获的数据包列表，
    不会重新抓包，也不会丢弃已捕获的数据。
 
-点击“打开 pcap”可以加载已有的 `.pcap` 或 `.pcapng` 文件，加载完成后同样可以
+点击“打开文件”可以加载已有的 `.pcap` 或 `.pcapng` 文件，加载完成后同样可以
 使用显示过滤器。也可以把文件作为启动参数：
 
 ```powershell
 .\build\vs\Release\NetObserver.exe .\captures\example.pcapng
 ```
+
+命令行离线分析：
+
+```powershell
+.\build\vs\Release\netobserver-cli.exe --read .\captures\example.pcapng
+```
+
+选择一个 TCP 数据包后，点击“跟随当前流”可以查看双向 TCP 重组内容。
+“仅此会话”会自动生成对应的地址和端口显示过滤器。
 
 程序会在当前工作目录的 `captures` 文件夹中保存 `.pcap` 文件。
 
@@ -84,12 +98,17 @@ not arp
 `udp.port`、`port`、`frame.len` 和 `protocol`，并支持 `and`、`or`、
 `not` 与括号。
 
+此外还支持 `ipv6.addr`、`ipv6.src`、`ipv6.dst`、`dns.id`、
+`dns.qry.name`、`http.request.method`、`http.request.uri`、`http.host`
+和 `http.response.code`。
+
 ## 已知限制
 
 - 当前主要解析 IPv4，IPv6 仅显示基础信息。
 - HTTP/FTP 分析基于单个数据包，尚未实现完整 TCP 流重组。
 - IP 分片暂不重组。
-- 可以读取 pcapng，但当前实时捕获仍保存为经典 pcap。
+- 实时捕获默认保存为 pcapng，同时兼容经典 pcap 文件。
+- TCP Follow Stream 仅保留每个方向最多 1 MB。
 - 公开版本发布前仍需补充更多畸形包测试和完整的隐私说明。
 
 ## License

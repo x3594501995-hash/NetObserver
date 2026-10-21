@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.0] - 2026-10-21
+
+### Added
+
+- pcapng export with interface metadata and microsecond timestamps
+- IPv6 base and extension-header parsing
+- DNS question and answer extraction
+- HTTP method, URI, Host, response code and content type fields
+- TCP reassembly with out-of-order segment handling
+- Conversation summaries and Follow Stream
+- Live packet and throughput rates
+- Batched UI packet delivery
+- Bounded packet and memory storage
+- Expanded display filter fields for IPv6, DNS and HTTP
+
 ## [0.1.0] - 2026-10-21
 
 ### Added

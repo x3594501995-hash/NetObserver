@@ -43,6 +43,9 @@ int main()
     http.sourcePort = 50000;
     http.destinationPort = 8080;
     http.applicationProtocol = "HTTP";
+    http.httpMethod = "GET";
+    http.httpUri = "/index.html";
+    http.httpHost = "lab.local";
     http.capturedLength = 180;
 
     netobserver::ParsedPacket dns;
@@ -53,6 +56,9 @@ int main()
     dns.hasPorts = true;
     dns.sourcePort = 53000;
     dns.destinationPort = 53;
+    dns.applicationProtocol = "DNS";
+    dns.dnsTransactionId = 0x1234;
+    dns.dnsQueryName = "www.example.com";
     dns.capturedLength = 92;
 
     netobserver::ParsedPacket arp;
@@ -60,6 +66,19 @@ int main()
     arp.sourceIp = "192.168.1.10";
     arp.destinationIp = "192.168.1.1";
     arp.capturedLength = 42;
+
+    netobserver::ParsedPacket ipv6 = dns;
+    ipv6.hasIpv4 = false;
+    ipv6.hasIpv6 = true;
+    ipv6.ipVersion = 6;
+    ipv6.sourceIp = "2001:db8::1";
+    ipv6.destinationIp = "2001:db8::2";
+
+    netobserver::ParsedPacket response = http;
+    response.httpMethod.clear();
+    response.httpUri.clear();
+    response.httpStatusCode = 404;
+    response.httpContentType = "text/plain";
 
     check(matches("http", http), "http protocol filter");
     check(!matches("http", dns), "http should reject DNS");
@@ -81,6 +100,19 @@ int main()
     check(
         matches("protocol == tcp", http),
         "protocol equality filter");
+    check(
+        matches(
+            "ipv6 and dns.qry.name == www.example.com and dns.id == 4660",
+            ipv6),
+        "IPv6 and DNS field filter");
+    check(
+        matches(
+            "http.request.method == GET and http.host == lab.local",
+            http),
+        "HTTP request field filter");
+    check(
+        matches("http.response.code == 404", response),
+        "HTTP response code filter");
 
     netobserver::DisplayFilter invalid;
     std::string error;

@@ -3,10 +3,13 @@
 #include "core/PacketTypes.h"
 
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
 namespace netobserver {
+
+class PcapNgWriter;
 
 struct AdapterInfo {
     std::string name;
@@ -28,7 +31,7 @@ enum class CaptureResult {
 
 class CaptureEngine {
 public:
-    CaptureEngine() = default;
+    CaptureEngine();
     CaptureEngine(const CaptureEngine&) = delete;
     CaptureEngine& operator=(const CaptureEngine&) = delete;
     ~CaptureEngine();
@@ -62,6 +65,7 @@ public:
 private:
     void* handle_ = nullptr;
     void* dumper_ = nullptr;
+    std::unique_ptr<PcapNgWriter> pcapngWriter_;
     bool offline_ = false;
     std::string adapterName_;
     std::string adapterDescription_;

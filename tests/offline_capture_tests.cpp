@@ -8,6 +8,7 @@
 
 #include "core/CaptureEngine.h"
 #include "core/PacketParser.h"
+#include "core/PcapNgWriter.h"
 
 #include <pcap.h>
 
@@ -115,6 +116,48 @@ int main()
 
     engine.close();
     std::filesystem::remove(path);
+
+    const auto pcapngPath =
+        std::filesystem::current_path() /
+        ("netobserver_offline_test_" +
+         std::to_string(
+             std::chrono::steady_clock::now().time_since_epoch().count()) +
+         ".pcapng");
+    netobserver::PcapNgWriter writer;
+    if (!writer.open(pcapngPath.string(), DLT_EN10MB, 65535, error)) {
+        std::cerr << "pcapng open failed: " << error << "\n";
+        return 1;
+    }
+    writer.writePacket(
+        header.ts.tv_sec,
+        header.ts.tv_usec,
+        packet.data(),
+        header.caplen,
+        header.len);
+    writer.close();
+
+    netobserver::CaptureEngine pcapngEngine;
+    if (!pcapngEngine.openOffline(pcapngPath.string(), error)) {
+        std::cerr << "pcapng openOffline failed: " << error << "\n";
+        std::filesystem::remove(pcapngPath);
+        return 1;
+    }
+    bytes.clear();
+    const auto pcapngResult =
+        pcapngEngine.next(bytes, metadata, error);
+    const auto parsedPcapng = netobserver::PacketParser::parsePacket(
+        bytes.data(),
+        bytes.size(),
+        metadata.originalLength,
+        pcapngEngine.dataLinkType());
+    pcapngEngine.close();
+    std::filesystem::remove(pcapngPath);
+    if (pcapngResult != netobserver::CaptureResult::Packet ||
+        parsedPcapng.destinationPort != 53) {
+        std::cerr << "pcapng round-trip failed\n";
+        return 1;
+    }
+
     std::cout << "Offline capture test passed\n";
     return 0;
 }

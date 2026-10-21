@@ -175,6 +175,8 @@ bool isProtocol(const ParsedPacket& packet, const std::string& value)
     const std::string protocol = lower(value);
     if (protocol == "ip" || protocol == "ipv4")
         return packet.hasIpv4;
+    if (protocol == "ipv6")
+        return packet.hasIpv6;
     if (protocol == "http")
         return packet.applicationProtocol == "HTTP" ||
             hasPort(packet, 80) || hasPort(packet, 8080);
@@ -310,7 +312,7 @@ private:
 
             static const std::vector<std::string> supported = {
                 "tcp", "udp", "icmp", "arp", "igmp", "ipv4",
-                "ip", "http", "dns",
+                "ip", "ipv6", "icmpv6", "http", "dns",
             };
             if (std::find(supported.begin(), supported.end(), field) ==
                 supported.end()) {
@@ -331,14 +333,19 @@ private:
 
         static const std::vector<std::string> supportedFields = {
             "ip.addr", "ip.src", "ip.dst", "tcp.port", "udp.port",
-            "port", "frame.len", "protocol",
+            "ipv6.addr", "ipv6.src", "ipv6.dst", "port", "frame.len",
+            "protocol", "dns.id", "dns.qry.name",
+            "http.request.method", "http.request.uri", "http.host",
+            "http.response.code",
         };
         if (std::find(supportedFields.begin(), supportedFields.end(), field) ==
             supportedFields.end()) {
             fail("不支持的比较字段: " + field);
         }
 
-        if (field == "frame.len") {
+        if (field == "frame.len" ||
+            field == "dns.id" ||
+            field == "http.response.code") {
             try {
                 std::size_t consumed = 0;
                 (void)std::stoll(node->value, &consumed);
@@ -389,6 +396,22 @@ bool evaluate(const DisplayFilter::Node* node, const ParsedPacket& packet)
             packet.destinationIp == node->value;
         return node->operation == TokenType::NotEqual ? !equal : equal;
     }
+    if (node->field == "ipv6.addr") {
+        if (!packet.hasIpv6)
+            return node->operation == TokenType::NotEqual;
+        const bool equal =
+            packet.sourceIp == node->value ||
+            packet.destinationIp == node->value;
+        return node->operation == TokenType::NotEqual ? !equal : equal;
+    }
+    if (node->field == "ipv6.src") {
+        return packet.hasIpv6 &&
+            compareText(packet.sourceIp, node->operation, node->value);
+    }
+    if (node->field == "ipv6.dst") {
+        return packet.hasIpv6 &&
+            compareText(packet.destinationIp, node->operation, node->value);
+    }
     if (node->field == "ip.src")
         return compareText(packet.sourceIp, node->operation, node->value);
     if (node->field == "ip.dst")
@@ -420,6 +443,30 @@ bool evaluate(const DisplayFilter::Node* node, const ParsedPacket& packet)
     if (node->field == "frame.len") {
         return compareNumber(
             packet.capturedLength,
+            node->operation,
+            std::stoll(node->value));
+    }
+    if (node->field == "dns.id") {
+        return compareNumber(
+            packet.dnsTransactionId,
+            node->operation,
+            std::stoll(node->value));
+    }
+    if (node->field == "dns.qry.name") {
+        return compareText(packet.dnsQueryName, node->operation, node->value);
+    }
+    if (node->field == "http.request.method") {
+        return compareText(packet.httpMethod, node->operation, node->value);
+    }
+    if (node->field == "http.request.uri") {
+        return compareText(packet.httpUri, node->operation, node->value);
+    }
+    if (node->field == "http.host") {
+        return compareText(packet.httpHost, node->operation, node->value);
+    }
+    if (node->field == "http.response.code") {
+        return compareNumber(
+            packet.httpStatusCode,
             node->operation,
             std::stoll(node->value));
     }

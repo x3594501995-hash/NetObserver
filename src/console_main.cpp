@@ -1,4 +1,5 @@
 #include "core/CaptureEngine.h"
+#include "core/FlowTracker.h"
 #include "core/PacketParser.h"
 
 #include <windows.h>
@@ -27,6 +28,7 @@ void printUsage()
     std::cout
         << "用法:\n"
         << "  netobserver-cli --list\n"
+        << "  netobserver-cli --read <抓包文件>\n"
         << "  netobserver-cli [--adapter <序号>] [--filter <BPF表达式>]\n\n"
         << "示例:\n"
         << "  netobserver-cli --adapter 1 --filter \"tcp port 80\"\n";
@@ -58,12 +60,15 @@ int main(int argc, char* argv[])
 
     int requestedAdapter = 0;
     std::string requestedFilter;
+    std::string readFile;
     bool listOnly = false;
 
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
         if (argument == "--list") {
             listOnly = true;
+        } else if (argument == "--read" && index + 1 < argc) {
+            readFile = argv[++index];
         } else if (argument == "--adapter" && index + 1 < argc) {
             if (!parseInteger(argv[++index], requestedAdapter) ||
                 requestedAdapter <= 0) {
@@ -80,6 +85,54 @@ int main(int argc, char* argv[])
             printUsage();
             return 2;
         }
+    }
+
+    if (!readFile.empty()) {
+        netobserver::CaptureEngine engine;
+        netobserver::FlowTracker flows;
+        std::string error;
+        if (!engine.openOffline(readFile, error)) {
+            std::cerr << "打开抓包文件失败: " << error << "\n";
+            return 1;
+        }
+
+        std::size_t count = 0;
+        while (true) {
+            std::vector<std::uint8_t> packetData;
+            netobserver::ParsedPacket metadata;
+            const auto result = engine.next(packetData, metadata, error);
+            if (result == netobserver::CaptureResult::End)
+                break;
+            if (result == netobserver::CaptureResult::Timeout)
+                continue;
+            if (result == netobserver::CaptureResult::Error) {
+                std::cerr << "读取抓包文件失败: " << error << "\n";
+                return 1;
+            }
+            auto packet = netobserver::PacketParser::parsePacket(
+                packetData.data(),
+                packetData.size(),
+                metadata.originalLength,
+                engine.dataLinkType());
+            packet.number = metadata.number;
+            flows.addPacket(
+                packet,
+                packetData.data(),
+                packetData.size());
+            ++count;
+            std::cout << "[" << packet.number << "] " << packet.summary << "\n";
+        }
+        engine.close();
+        std::cout << "已读取 " << count << " 个数据包\n";
+        const auto statistics = flows.statistics();
+        std::cout << "会话数: " << statistics.size() << "\n";
+        for (const auto& flow : statistics) {
+            std::cout << "  " << flow.protocol << " "
+                      << flow.endpointA << " <-> " << flow.endpointB
+                      << "  " << flow.packetsAToB + flow.packetsBToA
+                      << " 包\n";
+        }
+        return 0;
     }
 
     std::vector<netobserver::AdapterInfo> adapters;

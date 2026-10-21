@@ -7,12 +7,35 @@
 #endif
 
 #include "core/CaptureEngine.h"
+#include "core/PcapNgWriter.h"
 
 #include <pcap.h>
 
+#include <algorithm>
+#include <cctype>
 #include <utility>
 
 namespace netobserver {
+namespace {
+
+bool hasPcapNgExtension(const std::string& filePath)
+{
+    if (filePath.size() < 7)
+        return false;
+    std::string extension = filePath.substr(filePath.size() - 7);
+    std::transform(
+        extension.begin(),
+        extension.end(),
+        extension.begin(),
+        [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+    return extension == ".pcapng";
+}
+
+} // namespace
+
+CaptureEngine::CaptureEngine() = default;
 
 CaptureEngine::~CaptureEngine()
 {
@@ -181,16 +204,29 @@ bool CaptureEngine::startPcapDump(
         pcap_dump_close(static_cast<pcap_dumper_t*>(dumper_));
         dumper_ = nullptr;
     }
+    pcapngWriter_.reset();
     if (filePath.empty()) {
         error = "pcap 文件路径为空";
         return false;
     }
 
     auto* handle = static_cast<pcap_t*>(handle_);
-    dumper_ = pcap_dump_open(handle, filePath.c_str());
-    if (!dumper_) {
-        error = pcap_geterr(handle);
-        return false;
+    if (hasPcapNgExtension(filePath)) {
+        pcapngWriter_ = std::make_unique<PcapNgWriter>();
+        if (!pcapngWriter_->open(
+                filePath,
+                static_cast<std::uint16_t>(pcap_datalink(handle)),
+                static_cast<std::uint32_t>(pcap_snapshot(handle)),
+                error)) {
+            pcapngWriter_.reset();
+            return false;
+        }
+    } else {
+        dumper_ = pcap_dump_open(handle, filePath.c_str());
+        if (!dumper_) {
+            error = pcap_geterr(handle);
+            return false;
+        }
     }
     return true;
 }
@@ -225,7 +261,14 @@ CaptureResult CaptureEngine::next(
         return CaptureResult::Error;
     }
 
-    if (dumper_) {
+    if (pcapngWriter_) {
+        pcapngWriter_->writePacket(
+            packetHeader->ts.tv_sec,
+            packetHeader->ts.tv_usec,
+            rawPacket,
+            packetHeader->caplen,
+            packetHeader->len);
+    } else if (dumper_) {
         pcap_dump(
             static_cast<u_char*>(dumper_),
             packetHeader,
@@ -280,6 +323,7 @@ void CaptureEngine::close()
         pcap_dump_close(static_cast<pcap_dumper_t*>(dumper_));
         dumper_ = nullptr;
     }
+    pcapngWriter_.reset();
     if (handle_)
         pcap_close(static_cast<pcap_t*>(handle_));
     handle_ = nullptr;

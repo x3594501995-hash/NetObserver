@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(NetObserver VERSION 0.1.0 LANGUAGES CXX)
+project(NetObserver VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -46,7 +46,9 @@ endif()
 add_library(netobserver_core STATIC
     src/core/CaptureEngine.cpp
     src/core/DisplayFilter.cpp
+    src/core/FlowTracker.cpp
     src/core/PacketParser.cpp
+    src/core/PcapNgWriter.cpp
 )
 
 target_include_directories(netobserver_core
@@ -116,5 +118,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(netobserver-offline-tests PRIVATE netobserver_core)
     add_test(NAME netobserver_offline_tests COMMAND netobserver-offline-tests)
+
+    add_executable(netobserver-flow-tests
+        tests/flow_tracker_tests.cpp
+    )
+    target_link_libraries(netobserver-flow-tests PRIVATE netobserver_core)
+    add_test(NAME netobserver_flow_tests COMMAND netobserver-flow-tests)
 endif()
 

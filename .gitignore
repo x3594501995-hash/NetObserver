@@ -1,6 +1,7 @@
 /build/
 /dist/
 /out/
+/.planning/
 /.vs/
 /.tools/
 /cmake-build-*/

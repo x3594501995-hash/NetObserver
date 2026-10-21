@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -31,6 +32,8 @@ struct ParsedPacket {
     std::uint16_t etherType = 0;
 
     bool hasIpv4 = false;
+    bool hasIpv6 = false;
+    int ipVersion = 0;
     std::string sourceIp;
     std::string destinationIp;
     std::uint8_t ipProtocol = 0;
@@ -43,6 +46,21 @@ struct ParsedPacket {
     std::uint32_t tcpSequence = 0;
     std::uint32_t tcpAcknowledgment = 0;
     std::uint8_t tcpFlags = 0;
+    std::size_t transportPayloadOffset = 0;
+    std::size_t transportPayloadLength = 0;
+
+    std::uint16_t dnsTransactionId = 0;
+    bool dnsResponse = false;
+    std::uint8_t dnsResponseCode = 0;
+    std::string dnsQueryName;
+    std::string dnsAnswers;
+
+    std::string httpMethod;
+    std::string httpUri;
+    std::string httpHost;
+    int httpStatusCode = 0;
+    std::string httpStatusText;
+    std::string httpContentType;
 
     std::string applicationProtocol;
     std::string applicationSummary;

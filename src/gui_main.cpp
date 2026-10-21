@@ -1,5 +1,6 @@
 #include "core/CaptureEngine.h"
 #include "core/DisplayFilter.h"
+#include "core/FlowTracker.h"
 #include "core/PacketParser.h"
 
 #include <windows.h>
@@ -47,18 +48,25 @@ constexpr int kIdStatistics = 1018;
 constexpr int kIdDisplayFilter = 1019;
 constexpr int kIdApplyFilter = 1020;
 constexpr int kIdOpenPcap = 1021;
+constexpr int kIdFlowsEdit = 1022;
+constexpr int kIdFollowFlow = 1023;
+constexpr int kIdFilterFlow = 1024;
 
 constexpr UINT kMessageStarted = WM_APP + 1;
 constexpr UINT kMessageError = WM_APP + 2;
 constexpr UINT kMessageStopped = WM_APP + 3;
 constexpr UINT kMessagePacket = WM_APP + 4;
 constexpr UINT kMessageOfflineLoaded = WM_APP + 5;
+constexpr UINT kMessagePacketBatch = WM_APP + 6;
 
 constexpr COLORREF kBackgroundColor = RGB(243, 246, 250);
 constexpr COLORREF kHeaderColor = RGB(24, 42, 75);
 constexpr COLORREF kTextColor = RGB(39, 49, 64);
 constexpr COLORREF kMutedColor = RGB(104, 118, 138);
 constexpr COLORREF kAccentColor = RGB(30, 101, 180);
+constexpr std::size_t kMaximumStoredPackets = 100000;
+constexpr std::uint64_t kMaximumStoredBytes = 256ULL * 1024ULL * 1024ULL;
+constexpr std::size_t kPacketBatchSize = 64;
 
 struct FilterPreset {
     const wchar_t* label;
@@ -95,9 +103,12 @@ struct AppState {
     HWND packetList = nullptr;
     HWND displayFilterEdit = nullptr;
     HWND applyFilterButton = nullptr;
+    HWND followFlowButton = nullptr;
+    HWND filterFlowButton = nullptr;
     HWND tabs = nullptr;
     HWND detailsTree = nullptr;
     HWND hexEdit = nullptr;
+    HWND flowsEdit = nullptr;
     HWND statsLabel = nullptr;
     HWND pcapPath = nullptr;
     HWND statusLabel = nullptr;
@@ -105,6 +116,7 @@ struct AppState {
     std::vector<netobserver::AdapterInfo> adapters;
     std::vector<std::unique_ptr<PacketRecord>> packets;
     netobserver::DisplayFilter displayFilter;
+    netobserver::FlowTracker flowTracker;
     std::atomic_bool running{false};
     bool loadingOffline = false;
     std::thread worker;
@@ -119,6 +131,17 @@ struct AppState {
     std::uint64_t arp = 0;
     std::uint64_t icmp = 0;
     std::uint64_t igmp = 0;
+    netobserver::CaptureStatistics driverStatistics;
+    bool hasDriverStatistics = false;
+    std::uint64_t storedBytes = 0;
+    std::uint64_t lastTickCount = 0;
+    std::uint64_t lastRatePackets = 0;
+    std::uint64_t lastRateBytes = 0;
+    double packetsPerSecond = 0;
+    double bytesPerSecond = 0;
+    bool memoryLimitReached = false;
+    bool showingFollowStream = false;
+    std::string selectedFlowKey;
     int activeTab = 0;
 
     HFONT titleFont = nullptr;
@@ -130,6 +153,11 @@ struct AppState {
 };
 
 AppState g_app;
+
+void layoutControls(HWND window);
+void setActiveTab(int index);
+void signalWorkerStop();
+bool applyDisplayFilter();
 
 HMENU controlId(int id)
 {
@@ -223,6 +251,7 @@ std::wstring statisticsText(
     bool includeDriver = false,
     netobserver::CaptureStatistics driver = {})
 {
+    const double kilobytesPerSecond = g_app.bytesPerSecond / 1024.0;
     std::wostringstream output;
     output << L"显示/捕获 " << g_app.visiblePackets
            << L" / " << g_app.totalPackets << L"\r\n"
@@ -231,7 +260,10 @@ std::wstring statisticsText(
            << L"UDP       " << g_app.udp << L"\r\n"
            << L"ICMP      " << g_app.icmp << L"\r\n"
            << L"ARP       " << g_app.arp << L"\r\n"
-           << L"IGMP      " << g_app.igmp;
+           << L"IGMP      " << g_app.igmp << L"\r\n"
+           << std::fixed << std::setprecision(1)
+           << L"速率      " << g_app.packetsPerSecond << L" 包/s\r\n"
+           << L"流量      " << kilobytesPerSecond << L" KB/s";
     if (includeDriver) {
         output << L"\r\n\r\n驱动接收  " << driver.received
                << L"\r\n驱动丢弃  " << driver.dropped
@@ -242,7 +274,8 @@ std::wstring statisticsText(
 
 void refreshStatistics()
 {
-    const std::wstring text = statisticsText();
+    const std::wstring text =
+        statisticsText(g_app.hasDriverStatistics, g_app.driverStatistics);
     SetWindowTextW(g_app.statsLabel, text.c_str());
 }
 
@@ -317,9 +350,22 @@ void resetPackets()
     g_app.arp = 0;
     g_app.icmp = 0;
     g_app.igmp = 0;
+    g_app.driverStatistics = {};
+    g_app.hasDriverStatistics = false;
+    g_app.storedBytes = 0;
+    g_app.lastTickCount = GetTickCount64();
+    g_app.lastRatePackets = 0;
+    g_app.lastRateBytes = 0;
+    g_app.packetsPerSecond = 0;
+    g_app.bytesPerSecond = 0;
+    g_app.memoryLimitReached = false;
+    g_app.showingFollowStream = false;
+    g_app.selectedFlowKey.clear();
+    g_app.flowTracker.clear();
     ListView_DeleteAllItems(g_app.packetList);
     TreeView_DeleteAllItems(g_app.detailsTree);
     SetWindowTextW(g_app.hexEdit, L"");
+    SetWindowTextW(g_app.flowsEdit, L"");
     refreshStatistics();
 }
 
@@ -419,7 +465,10 @@ void addPacket(PacketRecord* record)
             : packet.destinationIp);
     const std::wstring number = std::to_wstring(packet.number);
     const std::wstring time = clockText(packet);
-    const std::wstring protocol = utf8ToWide(packet.protocol);
+    const std::wstring protocol = utf8ToWide(
+        packet.applicationProtocol.empty()
+            ? packet.protocol
+            : packet.protocol + " / " + packet.applicationProtocol);
     const std::wstring sourcePort =
         packet.hasPorts ? std::to_wstring(packet.sourcePort) : L"";
     const std::wstring destinationPort =
@@ -473,9 +522,102 @@ void updateSelection()
     const auto* record = reinterpret_cast<const PacketRecord*>(item.lParam);
     if (!record)
         return;
+    g_app.selectedFlowKey =
+        netobserver::FlowTracker::flowKey(record->parsed);
     populateDetailsTree(*record);
     const std::wstring hex = packetHex(*record);
     SetWindowTextW(g_app.hexEdit, hex.c_str());
+}
+
+void refreshFlowSummary()
+{
+    const auto flows = g_app.flowTracker.statistics();
+    std::wostringstream output;
+    output << L"会话数: " << flows.size() << L"\r\n\r\n";
+    const std::size_t limit = std::min<std::size_t>(flows.size(), 200);
+    for (std::size_t index = 0; index < limit; ++index) {
+        const auto& flow = flows[index];
+        output << utf8ToWide(flow.protocol) << L"  "
+               << utf8ToWide(flow.endpointA) << L"  <->  "
+               << utf8ToWide(flow.endpointB) << L"\r\n"
+               << L"  A->B: " << flow.packetsAToB << L" 包 / "
+               << flow.bytesAToB << L" bytes\r\n"
+               << L"  B->A: " << flow.packetsBToA << L" 包 / "
+               << flow.bytesBToA << L" bytes\r\n";
+        if (flow.tcpStreamAvailable)
+            output << L"  可查看 TCP Follow Stream\r\n";
+        output << L"\r\n";
+    }
+    if (flows.size() > limit)
+        output << L"仅显示前 " << limit << L" 个会话。\r\n";
+    SetWindowTextW(g_app.flowsEdit, output.str().c_str());
+    g_app.showingFollowStream = false;
+}
+
+const PacketRecord* selectedPacketRecord()
+{
+    int selected =
+        ListView_GetNextItem(g_app.packetList, -1, LVNI_SELECTED);
+    if (selected < 0)
+        selected = 0;
+    if (selected < 0 ||
+        selected >= ListView_GetItemCount(g_app.packetList)) {
+        return nullptr;
+    }
+    LVITEMW item{};
+    item.mask = LVIF_PARAM;
+    item.iItem = selected;
+    if (!ListView_GetItem(g_app.packetList, &item))
+        return nullptr;
+    return reinterpret_cast<const PacketRecord*>(item.lParam);
+}
+
+void showFollowStream()
+{
+    const PacketRecord* record = selectedPacketRecord();
+    if (record) {
+        g_app.selectedFlowKey =
+            netobserver::FlowTracker::flowKey(record->parsed);
+    }
+    if (g_app.selectedFlowKey.empty()) {
+        setStatus(L"请先在数据包列表中选择 TCP 或 UDP 会话");
+        return;
+    }
+    const std::string follow =
+        g_app.flowTracker.followStream(g_app.selectedFlowKey);
+    SetWindowTextW(g_app.flowsEdit, utf8ToWide(follow).c_str());
+    TabCtrl_SetCurSel(g_app.tabs, 2);
+    setActiveTab(2);
+    layoutControls(g_app.window);
+    g_app.showingFollowStream = true;
+    setStatus(L"已显示当前数据包所属会话的 TCP 流");
+}
+
+void filterCurrentFlow()
+{
+    const PacketRecord* record = selectedPacketRecord();
+    if (!record || !record->parsed.hasPorts ||
+        (record->parsed.protocol != "TCP" &&
+         record->parsed.protocol != "UDP")) {
+        setStatus(L"请选择一个 TCP 或 UDP 数据包");
+        return;
+    }
+
+    const auto& packet = record->parsed;
+    const std::string protocol =
+        packet.protocol == "TCP" ? "tcp" : "udp";
+    const std::string expression =
+        protocol +
+        " and ip.addr == " + packet.sourceIp +
+        " and ip.addr == " + packet.destinationIp +
+        " and " + protocol + ".port == " +
+        std::to_string(packet.sourcePort) +
+        " and " + protocol + ".port == " +
+        std::to_string(packet.destinationPort);
+    SetWindowTextW(
+        g_app.displayFilterEdit,
+        utf8ToWide(expression).c_str());
+    applyDisplayFilter();
 }
 
 bool packetMatchesDisplayFilter(const PacketRecord& record)
@@ -517,11 +659,61 @@ bool applyDisplayFilter()
     return true;
 }
 
+bool processPacketRecord(std::unique_ptr<PacketRecord> record)
+{
+    if (!record)
+        return true;
+    if (g_app.memoryLimitReached ||
+        g_app.packets.size() >= kMaximumStoredPackets ||
+        g_app.storedBytes + record->bytes.size() > kMaximumStoredBytes) {
+        g_app.memoryLimitReached = true;
+        signalWorkerStop();
+        setStatus(L"已达到数据包存储上限，捕获已自动停止");
+        return false;
+    }
+
+    auto* raw = record.get();
+    g_app.storedBytes += raw->bytes.size();
+    g_app.flowTracker.addPacket(
+        raw->parsed,
+        raw->bytes.data(),
+        raw->bytes.size());
+    g_app.packets.push_back(std::move(record));
+    countPacket(raw->parsed);
+    if (packetMatchesDisplayFilter(*raw))
+        addPacket(raw);
+    refreshStatistics();
+    if (g_app.totalPackets % 50 == 0 && !g_app.showingFollowStream)
+        refreshFlowSummary();
+    return true;
+}
+
+bool postPacketBatch(
+    HWND window,
+    std::vector<std::unique_ptr<PacketRecord>>& records)
+{
+    if (records.empty())
+        return true;
+    auto* payload = new std::vector<std::unique_ptr<PacketRecord>>(
+        std::move(records));
+    if (!PostMessageW(
+            window,
+            kMessagePacketBatch,
+            0,
+            reinterpret_cast<LPARAM>(payload))) {
+        delete payload;
+        return false;
+    }
+    records.clear();
+    return true;
+}
+
 void setActiveTab(int index)
 {
     g_app.activeTab = index;
     ShowWindow(g_app.detailsTree, index == 0 ? SW_SHOW : SW_HIDE);
     ShowWindow(g_app.hexEdit, index == 1 ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_app.flowsEdit, index == 2 ? SW_SHOW : SW_HIDE);
 }
 
 void postText(HWND window, UINT message, const std::wstring& text)
@@ -559,7 +751,7 @@ void captureWorker(HWND window, netobserver::AdapterInfo adapter, std::string fi
             wchar_t fileName[128]{};
             swprintf_s(
                 fileName,
-                L"captures\\netobserver_%04u%02u%02u_%02u%02u%02u.pcap",
+                L"captures\\netobserver_%04u%02u%02u_%02u%02u%02u.pcapng",
                 now.wYear, now.wMonth, now.wDay,
                 now.wHour, now.wMinute, now.wSecond);
             const int pathSize = WideCharToMultiByte(
@@ -572,7 +764,7 @@ void captureWorker(HWND window, netobserver::AdapterInfo adapter, std::string fi
                 failed = true;
                 postText(
                     window, kMessageError,
-                    L"创建 pcap 文件失败: " + utf8ToWide(error));
+                    L"创建 pcapng 文件失败: " + utf8ToWide(error));
             } else {
                 pcapDisplay = fileName;
             }
@@ -586,6 +778,7 @@ void captureWorker(HWND window, netobserver::AdapterInfo adapter, std::string fi
             if (g_app.running.load())
                 postText(window, kMessageStarted, pcapDisplay);
 
+            std::vector<std::unique_ptr<PacketRecord>> batch;
             while (!failed && g_app.running.load()) {
                 std::vector<std::uint8_t> bytes;
                 netobserver::ParsedPacket metadata;
@@ -611,12 +804,16 @@ void captureWorker(HWND window, netobserver::AdapterInfo adapter, std::string fi
                 record->parsed.number = metadata.number;
                 record->parsed.timestampSeconds = metadata.timestampSeconds;
                 record->parsed.timestampMicroseconds = metadata.timestampMicroseconds;
-                auto* raw = record.release();
-                if (!PostMessageW(window, kMessagePacket, 0, reinterpret_cast<LPARAM>(raw))) {
-                    delete raw;
+                batch.push_back(std::move(record));
+                if (batch.size() >= kPacketBatchSize &&
+                    !postPacketBatch(window, batch)) {
+                    failed = true;
                     break;
                 }
             }
+
+            if (!postPacketBatch(window, batch))
+                failed = true;
 
             if (!engine.statistics(statistics, error)) {
                 failed = true;
@@ -656,6 +853,7 @@ void loadWorker(HWND window, std::string filePath)
             g_app.activeEngine = &engine;
         }
 
+        std::vector<std::unique_ptr<PacketRecord>> batch;
         while (g_app.running.load()) {
             std::vector<std::uint8_t> bytes;
             netobserver::ParsedPacket metadata;
@@ -681,13 +879,16 @@ void loadWorker(HWND window, std::string filePath)
             record->parsed.number = metadata.number;
             record->parsed.timestampSeconds = metadata.timestampSeconds;
             record->parsed.timestampMicroseconds = metadata.timestampMicroseconds;
-            auto* raw = record.release();
-            if (!PostMessageW(window, kMessagePacket, 0, reinterpret_cast<LPARAM>(raw))) {
-                delete raw;
+            batch.push_back(std::move(record));
+            if (batch.size() >= kPacketBatchSize &&
+                !postPacketBatch(window, batch)) {
                 failed = true;
                 break;
             }
         }
+
+        if (!postPacketBatch(window, batch))
+            failed = true;
 
         {
             std::lock_guard<std::mutex> lock(g_app.engineMutex);
@@ -751,7 +952,7 @@ void openPcapFile(HWND window)
     beginLoadPcap(window, choosePcapFile(window));
 }
 
-void stopCapture()
+void signalWorkerStop()
 {
     g_app.running.store(false);
     {
@@ -759,6 +960,11 @@ void stopCapture()
         if (g_app.activeEngine)
             g_app.activeEngine->breakLoop();
     }
+}
+
+void stopCapture()
+{
+    signalWorkerStop();
     if (g_app.worker.joinable())
         g_app.worker.join();
     setRunningUi(false);
@@ -782,7 +988,7 @@ void startCapture(HWND window)
     g_app.running.store(true);
     g_app.loadingOffline = false;
     setRunningUi(true);
-    setStatus(L"正在打开网卡并创建 pcap 文件...");
+    setStatus(L"正在打开网卡并创建 pcapng 文件...");
     g_app.worker = std::thread(captureWorker, window, adapter, filter);
 }
 
@@ -863,16 +1069,31 @@ void layoutControls(HWND window)
         controlWidth, 32, SWP_NOZORDER);
 
     const int displayFilterY = contentTop;
-    const int filterButtonWidth = 82;
+    const int applyButtonWidth = 82;
+    const int followButtonWidth = 96;
+    const int filterFlowButtonWidth = 86;
     SetWindowPos(
         g_app.displayFilterEdit, nullptr,
         rightX + 70, displayFilterY,
-        std::max(140, rightWidth - 70 - filterButtonWidth - 6), 28,
+        std::max(
+            140,
+            rightWidth - 70 - applyButtonWidth - followButtonWidth -
+                filterFlowButtonWidth - 18),
+        28,
         SWP_NOZORDER);
     SetWindowPos(
+        g_app.filterFlowButton, nullptr,
+        rightX + rightWidth - followButtonWidth - applyButtonWidth -
+            filterFlowButtonWidth - 12,
+        displayFilterY, filterFlowButtonWidth, 28, SWP_NOZORDER);
+    SetWindowPos(
         g_app.applyFilterButton, nullptr,
-        rightX + rightWidth - filterButtonWidth,
-        displayFilterY, filterButtonWidth, 28, SWP_NOZORDER);
+        rightX + rightWidth - followButtonWidth - applyButtonWidth - 6,
+        displayFilterY, applyButtonWidth, 28, SWP_NOZORDER);
+    SetWindowPos(
+        g_app.followFlowButton, nullptr,
+        rightX + rightWidth - followButtonWidth,
+        displayFilterY, followButtonWidth, 28, SWP_NOZORDER);
 
     const int listTop = contentTop + 36;
     const int remainingHeight = contentBottom - listTop;
@@ -902,6 +1123,11 @@ void layoutControls(HWND window)
         page.left + 2, page.top + 2,
         page.right - page.left - 4, page.bottom - page.top - 4,
         SWP_NOZORDER);
+    SetWindowPos(
+        g_app.flowsEdit, nullptr,
+        page.left + 2, page.top + 2,
+        page.right - page.left - 4, page.bottom - page.top - 4,
+        SWP_NOZORDER);
 
     SetWindowPos(
         g_app.statusLabel, nullptr,
@@ -916,7 +1142,7 @@ void createHeader(HWND window, HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 10, 260, 30, window, nullptr, instance, nullptr);
     g_app.subtitle = CreateWindowExW(
-        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.1.0",
+        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.0",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 39, 460, 18, window, nullptr, instance, nullptr);
     g_app.state = CreateWindowExW(
@@ -963,7 +1189,7 @@ void createControls(HWND window)
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         24, 168, 78, 28, window, controlId(kIdRefresh), instance, nullptr);
     g_app.openButton = CreateWindowExW(
-        0, L"BUTTON", L"打开 pcap",
+        0, L"BUTTON", L"打开文件",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         106, 168, 78, 28, window, controlId(kIdOpenPcap), instance, nullptr);
     g_app.clearButton = CreateWindowExW(
@@ -1015,6 +1241,14 @@ void createControls(HWND window)
         0, L"BUTTON", L"应用过滤",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         1175, 76, 82, 28, window, controlId(kIdApplyFilter), instance, nullptr);
+    g_app.followFlowButton = CreateWindowExW(
+        0, L"BUTTON", L"跟随当前流",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        1080, 76, 96, 28, window, controlId(kIdFollowFlow), instance, nullptr);
+    g_app.filterFlowButton = CreateWindowExW(
+        0, L"BUTTON", L"仅此会话",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        988, 76, 86, 28, window, controlId(kIdFilterFlow), instance, nullptr);
 
     g_app.packetList = CreateWindowExW(
         WS_EX_CLIENTEDGE, WC_LISTVIEWW, nullptr,
@@ -1034,6 +1268,11 @@ void createControls(HWND window)
         WS_CHILD | WS_TABSTOP | ES_MULTILINE | ES_READONLY |
             ES_AUTOVSCROLL | ES_AUTOHSCROLL | WS_VSCROLL | WS_HSCROLL,
         304, 446, 950, 250, window, controlId(kIdHex), instance, nullptr);
+    g_app.flowsEdit = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", nullptr,
+        WS_CHILD | WS_TABSTOP | ES_MULTILINE | ES_READONLY |
+            ES_AUTOVSCROLL | ES_AUTOHSCROLL | WS_VSCROLL | WS_HSCROLL,
+        304, 446, 950, 250, window, controlId(kIdFlowsEdit), instance, nullptr);
     g_app.statusLabel = CreateWindowExW(
         WS_EX_CLIENTEDGE, L"STATIC", L"准备就绪",
         WS_CHILD | WS_VISIBLE | SS_LEFT | SS_CENTERIMAGE,
@@ -1045,11 +1284,15 @@ void createControls(HWND window)
     TabCtrl_InsertItem(g_app.tabs, 0, &tab);
     tab.pszText = const_cast<wchar_t*>(L"十六进制");
     TabCtrl_InsertItem(g_app.tabs, 1, &tab);
+    tab.pszText = const_cast<wchar_t*>(L"会话 / 跟随流");
+    TabCtrl_InsertItem(g_app.tabs, 2, &tab);
 
     SetWindowFont(g_app.adapterCombo, g_app.uiFont, TRUE);
     SetWindowFont(g_app.filterEdit, g_app.uiFont, TRUE);
     SetWindowFont(g_app.displayFilterEdit, g_app.uiFont, TRUE);
     SetWindowFont(g_app.applyFilterButton, g_app.uiFont, TRUE);
+    SetWindowFont(g_app.followFlowButton, g_app.uiFont, TRUE);
+    SetWindowFont(g_app.filterFlowButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.refreshButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.openButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.clearButton, g_app.uiFont, TRUE);
@@ -1063,6 +1306,7 @@ void createControls(HWND window)
     SetWindowFont(g_app.tabs, g_app.uiFont, TRUE);
     SetWindowFont(g_app.detailsTree, g_app.uiFont, TRUE);
     SetWindowFont(g_app.hexEdit, g_app.monoFont, TRUE);
+    SetWindowFont(g_app.flowsEdit, g_app.monoFont, TRUE);
     SetWindowFont(g_app.statusLabel, g_app.subtitleFont, TRUE);
 
     setupList();
@@ -1073,6 +1317,10 @@ void createControls(HWND window)
 
 COLORREF protocolColor(const std::string& protocol)
 {
+    if (protocol == "HTTP")
+        return RGB(0, 128, 128);
+    if (protocol == "DNS")
+        return RGB(126, 74, 176);
     if (protocol == "TCP")
         return RGB(23, 123, 91);
     if (protocol == "UDP")
@@ -1099,8 +1347,12 @@ LRESULT handleCustomDraw(LPARAM lParam)
         ListView_GetItem(g_app.packetList, &item);
         const auto* record =
             reinterpret_cast<const PacketRecord*>(item.lParam);
-        if (record)
-            draw->clrText = protocolColor(record->parsed.protocol);
+        if (record) {
+            draw->clrText = protocolColor(
+                record->parsed.applicationProtocol.empty()
+                    ? record->parsed.protocol
+                    : record->parsed.applicationProtocol);
+        }
         if (draw->nmcd.uItemState & CDIS_SELECTED) {
             draw->clrTextBk = RGB(215, 229, 247);
             draw->clrText = RGB(20, 62, 112);
@@ -1128,6 +1380,30 @@ LRESULT CALLBACK windowProcedure(
         g_app.window = window;
         createControls(window);
         layoutControls(window);
+        SetTimer(window, 1, 1000, nullptr);
+        return 0;
+    case WM_TIMER:
+        if (wParam == 1) {
+            const std::uint64_t now = GetTickCount64();
+            if (g_app.lastTickCount == 0)
+                g_app.lastTickCount = now;
+            const double elapsed =
+                std::max<std::uint64_t>(1, now - g_app.lastTickCount) / 1000.0;
+            const std::uint64_t packetDelta =
+                g_app.totalPackets >= g_app.lastRatePackets
+                    ? g_app.totalPackets - g_app.lastRatePackets
+                    : 0;
+            const std::uint64_t byteDelta =
+                g_app.totalBytes >= g_app.lastRateBytes
+                    ? g_app.totalBytes - g_app.lastRateBytes
+                    : 0;
+            g_app.packetsPerSecond = packetDelta / elapsed;
+            g_app.bytesPerSecond = byteDelta / elapsed;
+            g_app.lastTickCount = now;
+            g_app.lastRatePackets = g_app.totalPackets;
+            g_app.lastRateBytes = g_app.totalBytes;
+            refreshStatistics();
+        }
         return 0;
     case WM_SIZE:
         layoutControls(window);
@@ -1200,6 +1476,14 @@ LRESULT CALLBACK windowProcedure(
             applyDisplayFilter();
             return 0;
         }
+        if (id == kIdFollowFlow) {
+            showFollowStream();
+            return 0;
+        }
+        if (id == kIdFilterFlow) {
+            filterCurrentFlow();
+            return 0;
+        }
         if (id >= kIdPresetFirst && id <= kIdPresetLast) {
             const int index = id - kIdPresetFirst;
             SetWindowTextW(
@@ -1231,7 +1515,7 @@ LRESULT CALLBACK windowProcedure(
         if (path)
             SetWindowTextW(
                 g_app.pcapPath,
-                (L"pcap: " + *path).c_str());
+                (L"捕获文件: " + *path).c_str());
         setStatus(L"正在捕获数据包，点击“停止”结束");
         InvalidateRect(g_app.state, nullptr, TRUE);
         return 0;
@@ -1248,18 +1532,29 @@ LRESULT CALLBACK windowProcedure(
     case kMessagePacket: {
         std::unique_ptr<PacketRecord> record(
             reinterpret_cast<PacketRecord*>(lParam));
-        if (!record)
-            return 0;
-        auto* raw = record.get();
-        g_app.packets.push_back(std::move(record));
-        countPacket(raw->parsed);
-        if (packetMatchesDisplayFilter(*raw))
-            addPacket(raw);
-        refreshStatistics();
+        processPacketRecord(std::move(record));
         setStatus(
             g_app.loadingOffline
                 ? L"正在读取抓包文件"
                 : L"正在捕获数据包");
+        return 0;
+    }
+    case kMessagePacketBatch: {
+        std::unique_ptr<std::vector<std::unique_ptr<PacketRecord>>> batch(
+            reinterpret_cast<
+                std::vector<std::unique_ptr<PacketRecord>>*>(lParam));
+        if (!batch)
+            return 0;
+        for (auto& record : *batch) {
+            if (!processPacketRecord(std::move(record)))
+                break;
+        }
+        setStatus(
+            g_app.memoryLimitReached
+                ? L"已达到数据包存储上限，捕获已自动停止"
+                : g_app.loadingOffline
+                    ? L"正在读取抓包文件"
+                    : L"正在捕获数据包");
         return 0;
     }
     case kMessageStopped: {
@@ -1267,28 +1562,46 @@ LRESULT CALLBACK windowProcedure(
             reinterpret_cast<netobserver::CaptureStatistics*>(lParam));
         g_app.running.store(false);
         setRunningUi(false);
-        SetWindowTextW(
-            g_app.statsLabel,
-            statisticsText(
-                true,
-                statistics ? *statistics : netobserver::CaptureStatistics{}).c_str());
-        setStatus(L"捕获已停止");
+        g_app.driverStatistics =
+            statistics ? *statistics : netobserver::CaptureStatistics{};
+        g_app.hasDriverStatistics = true;
+        refreshStatistics();
+        g_app.loadingOffline = false;
+        refreshFlowSummary();
+        const auto flowCount = g_app.flowTracker.statistics().size();
+        setStatus(
+            g_app.memoryLimitReached
+                ? L"捕获已停止：已达到数据包存储上限"
+                : L"捕获已停止，会话 " +
+                    std::to_wstring(flowCount) + L" 个");
         return 0;
     }
-    case kMessageOfflineLoaded:
+    case kMessageOfflineLoaded: {
         g_app.running.store(false);
         g_app.loadingOffline = false;
         setRunningUi(false);
-        setStatus(
-            L"抓包文件加载完成，共 " +
-            std::to_wstring(g_app.totalPackets) +
-            L" 个数据包");
+        refreshFlowSummary();
+        const auto flowCount = g_app.flowTracker.statistics().size();
+        if (g_app.memoryLimitReached) {
+            setStatus(
+                L"抓包文件仅加载到存储上限，共 " +
+                std::to_wstring(g_app.totalPackets) +
+                L" 个数据包");
+        } else {
+            setStatus(
+                L"抓包文件加载完成，共 " +
+                std::to_wstring(g_app.totalPackets) +
+                L" 个数据包，会话 " +
+                std::to_wstring(flowCount) + L" 个");
+        }
         return 0;
+    }
     case WM_CLOSE:
         stopCapture();
         DestroyWindow(window);
         return 0;
     case WM_DESTROY:
+        KillTimer(window, 1);
         if (g_app.titleFont)
             DeleteObject(g_app.titleFont);
         if (g_app.subtitleFont)
