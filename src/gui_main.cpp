@@ -1186,7 +1186,7 @@ void createHeader(HWND window, HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 10, 260, 30, window, nullptr, instance, nullptr);
     g_app.subtitle = CreateWindowExW(
-        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.5",
+        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.6",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 39, 460, 18, window, nullptr, instance, nullptr);
     g_app.state = CreateWindowExW(
@@ -1312,8 +1312,8 @@ void createControls(HWND window)
             TVS_HASLINES | TVS_LINESATROOT | TVS_SHOWSELALWAYS,
         304, 446, 950, 250, window, controlId(kIdDetailsTree), instance, nullptr);
     g_app.hexEdit = CreateWindowExW(
-        WS_EX_CLIENTEDGE, L"EDIT", nullptr,
-        WS_CHILD | WS_TABSTOP | ES_MULTILINE | ES_READONLY |
+        WS_EX_CLIENTEDGE, MSFTEDIT_CLASS, nullptr,
+        WS_CHILD | WS_TABSTOP | ES_MULTILINE | ES_READONLY | ES_NOHIDESEL |
             ES_AUTOVSCROLL | ES_AUTOHSCROLL | WS_VSCROLL | WS_HSCROLL,
         304, 446, 950, 250, window, controlId(kIdHex), instance, nullptr);
     g_app.flowsEdit = CreateWindowExW(
@@ -1356,6 +1356,18 @@ void createControls(HWND window)
     SetWindowFont(g_app.detailsTree, g_app.uiFont, TRUE);
     SetWindowFont(g_app.hexEdit, g_app.monoFont, TRUE);
     SetWindowFont(g_app.flowsEdit, g_app.monoFont, TRUE);
+    SendMessageW(
+        g_app.hexEdit,
+        EM_EXLIMITTEXT,
+        0,
+        static_cast<LPARAM>(16U * 1024U * 1024U));
+    SendMessageW(
+        g_app.flowsEdit,
+        EM_EXLIMITTEXT,
+        0,
+        static_cast<LPARAM>(16U * 1024U * 1024U));
+    SendMessageW(g_app.hexEdit, EM_SETTEXTMODE, TM_PLAINTEXT, 0);
+    SendMessageW(g_app.flowsEdit, EM_SETTEXTMODE, TM_PLAINTEXT, 0);
     SetWindowFont(g_app.statusLabel, g_app.subtitleFont, TRUE);
 
     setupList();

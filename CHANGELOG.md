@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.6] - 2026-10-21
+
+### Fixed
+
+- Replaced the packet hexadecimal editor with Rich Edit.
+- Eliminated long-text scroll repaint artifacts that required double-click or
+  Select All to restore readable content.
+- Raised the text limit for hex and stream views to 16 million characters.
+
 ## [0.2.5] - 2026-10-21
 
 ### Added
