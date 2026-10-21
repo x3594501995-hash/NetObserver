@@ -8,7 +8,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 
 ## 版本
 
-当前版本：`0.2.2`
+当前版本：`0.2.3`
 
 ## 功能
 
@@ -59,7 +59,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 .\scripts\package-release.ps1
 ```
 
-输出位于 `dist\NetObserver-v0.2.2-win64.zip`，同时生成 SHA256 校验文件。
+输出位于 `dist\NetObserver-v0.2.3-win64.zip`，同时生成 SHA256 校验文件。
 
 ## 使用
 

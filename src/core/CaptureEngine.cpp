@@ -107,6 +107,13 @@ bool CaptureEngine::open(
         return false;
     }
 
+    char modeErrorBuffer[PCAP_ERRBUF_SIZE]{};
+    nonBlocking_ =
+        pcap_setnonblock(
+            static_cast<pcap_t*>(handle_),
+            1,
+            modeErrorBuffer) == 0;
+
     adapterName_ = adapter.name;
     adapterDescription_ = adapter.description;
     nextPacketNumber_ = 1;
@@ -136,6 +143,7 @@ bool CaptureEngine::openOffline(
     adapterDescription_ = "Offline capture";
     nextPacketNumber_ = 1;
     offline_ = true;
+    nonBlocking_ = false;
     return true;
 }
 
@@ -331,6 +339,7 @@ void CaptureEngine::close()
     adapterDescription_.clear();
     nextPacketNumber_ = 1;
     offline_ = false;
+    nonBlocking_ = false;
 }
 
 bool CaptureEngine::isOpen() const noexcept

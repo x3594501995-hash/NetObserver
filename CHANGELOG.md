@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.3] - 2026-10-21
+
+### Fixed
+
+- Switched live capture to non-blocking Npcap reads with a 5 ms stop poll.
+- Reduced redundant UI statistics updates during packet batches.
+- Improved Stop responsiveness when the selected interface is idle or busy.
+
 ## [0.2.2] - 2026-10-21
 
 ### Fixed

@@ -126,6 +126,7 @@ struct AppState {
 
     std::uint64_t totalPackets = 0;
     std::uint64_t visiblePackets = 0;
+    std::uint64_t lastFlowSummaryAt = 0;
     std::uint64_t totalBytes = 0;
     std::uint64_t tcp = 0;
     std::uint64_t udp = 0;
@@ -294,7 +295,6 @@ void countPacket(const netobserver::ParsedPacket& packet)
         ++g_app.icmp;
     else if (packet.protocol == "IGMP")
         ++g_app.igmp;
-    refreshStatistics();
 }
 
 void populateAdapters()
@@ -354,6 +354,7 @@ void resetPackets()
     g_app.driverStatistics = {};
     g_app.hasDriverStatistics = false;
     g_app.storedBytes = 0;
+    g_app.lastFlowSummaryAt = 0;
     g_app.lastTickCount = GetTickCount64();
     g_app.lastRatePackets = 0;
     g_app.lastRateBytes = 0;
@@ -553,6 +554,7 @@ void refreshFlowSummary()
         output << L"仅显示前 " << limit << L" 个会话。\r\n";
     SetWindowTextW(g_app.flowsEdit, output.str().c_str());
     g_app.showingFollowStream = false;
+    g_app.lastFlowSummaryAt = g_app.totalPackets;
 }
 
 const PacketRecord* selectedPacketRecord()
@@ -700,9 +702,6 @@ bool processPacketRecord(std::unique_ptr<PacketRecord> record)
     countPacket(raw->parsed);
     if (packetMatchesDisplayFilter(*raw))
         addPacket(raw);
-    refreshStatistics();
-    if (g_app.totalPackets % 50 == 0 && !g_app.showingFollowStream)
-        refreshFlowSummary();
     return true;
 }
 
@@ -813,8 +812,10 @@ void captureWorker(HWND window, netobserver::AdapterInfo adapter, std::string fi
                 netobserver::ParsedPacket metadata;
                 error.clear();
                 const auto result = engine.next(bytes, metadata, error);
-                if (result == netobserver::CaptureResult::Timeout)
+                if (result == netobserver::CaptureResult::Timeout) {
+                    Sleep(5);
                     continue;
+                }
                 if (result == netobserver::CaptureResult::End)
                     break;
                 if (result == netobserver::CaptureResult::Error) {
@@ -888,8 +889,10 @@ void loadWorker(HWND window, std::string filePath)
             netobserver::ParsedPacket metadata;
             error.clear();
             const auto result = engine.next(bytes, metadata, error);
-            if (result == netobserver::CaptureResult::Timeout)
+            if (result == netobserver::CaptureResult::Timeout) {
+                Sleep(5);
                 continue;
+            }
             if (result == netobserver::CaptureResult::End)
                 break;
             if (result == netobserver::CaptureResult::Error) {
@@ -1171,7 +1174,7 @@ void createHeader(HWND window, HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 10, 260, 30, window, nullptr, instance, nullptr);
     g_app.subtitle = CreateWindowExW(
-        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.2",
+        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.3",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 39, 460, 18, window, nullptr, instance, nullptr);
     g_app.state = CreateWindowExW(
@@ -1562,6 +1565,11 @@ LRESULT CALLBACK windowProcedure(
         std::unique_ptr<PacketRecord> record(
             reinterpret_cast<PacketRecord*>(lParam));
         processPacketRecord(std::move(record));
+        refreshStatistics();
+        if (!g_app.showingFollowStream &&
+            g_app.totalPackets - g_app.lastFlowSummaryAt >= 200) {
+            refreshFlowSummary();
+        }
         setStatus(
             g_app.loadingOffline
                 ? L"正在读取抓包文件"
@@ -1578,6 +1586,11 @@ LRESULT CALLBACK windowProcedure(
         for (auto& record : *batch) {
             if (!processPacketRecord(std::move(record)))
                 break;
+        }
+        refreshStatistics();
+        if (!g_app.showingFollowStream &&
+            g_app.totalPackets - g_app.lastFlowSummaryAt >= 200) {
+            refreshFlowSummary();
         }
         setStatus(
             g_app.memoryLimitReached

@@ -67,6 +67,7 @@ private:
     void* dumper_ = nullptr;
     std::unique_ptr<PcapNgWriter> pcapngWriter_;
     bool offline_ = false;
+    bool nonBlocking_ = false;
     std::string adapterName_;
     std::string adapterDescription_;
     std::uint64_t nextPacketNumber_ = 1;
