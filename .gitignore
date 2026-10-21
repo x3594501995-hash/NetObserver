@@ -1,0 +1,13 @@
+/build/
+/dist/
+/out/
+/.vs/
+/.tools/
+/cmake-build-*/
+/third_party/npcap-sdk-*.zip
+/third_party/npcap-sdk/
+*.user
+*.suo
+*.pcap
+*.pcapng
+

@@ -1,0 +1,7 @@
+{
+  "cmake.useCMakePresets": "always",
+  "cmake.configureOnOpen": true,
+  "files.encoding": "utf8",
+  "files.eol": "\r\n"
+}
+
