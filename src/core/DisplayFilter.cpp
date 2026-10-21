@@ -178,10 +178,9 @@ bool isProtocol(const ParsedPacket& packet, const std::string& value)
     if (protocol == "ipv6")
         return packet.hasIpv6;
     if (protocol == "http")
-        return packet.applicationProtocol == "HTTP" ||
-            hasPort(packet, 80) || hasPort(packet, 8080);
+        return packet.applicationProtocol == "HTTP";
     if (protocol == "dns")
-        return hasPort(packet, 53);
+        return packet.applicationProtocol == "DNS";
     return lower(packet.protocol) == protocol;
 }
 

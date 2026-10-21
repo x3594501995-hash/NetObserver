@@ -118,7 +118,7 @@ bool PcapNgWriter::open(
     appendU16(shb, 1);
     appendU16(shb, 0);
     appendU64(shb, 0xFFFFFFFFFFFFFFFFULL);
-    appendOption(shb, 4, optionText("NetObserver 0.2.7"));
+    appendOption(shb, 4, optionText("NetObserver 0.2.8"));
     appendU16(shb, 0);
     appendU16(shb, 0);
     if (!finishBlock(shb, impl_->output)) {

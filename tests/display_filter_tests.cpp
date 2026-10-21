@@ -80,8 +80,16 @@ int main()
     response.httpStatusCode = 404;
     response.httpContentType = "text/plain";
 
+    netobserver::ParsedPacket tcpPort80 = http;
+    tcpPort80.sourcePort = 50000;
+    tcpPort80.destinationPort = 80;
+    tcpPort80.applicationProtocol.clear();
+
     check(matches("http", http), "http protocol filter");
     check(!matches("http", dns), "http should reject DNS");
+    check(
+        !matches("http", tcpPort80),
+        "http should reject an unidentified TCP packet on port 80");
     check(matches("dns", dns), "dns protocol filter");
     check(
         matches(
@@ -116,6 +124,17 @@ int main()
 
     netobserver::DisplayFilter invalid;
     std::string error;
+    for (const std::string& expression : {
+             "icmp",
+             "arp",
+             "dns or udp.port == 53 or tcp.port == 53",
+             "tcp",
+             "http"}) {
+        netobserver::DisplayFilter preset;
+        check(
+            preset.compile(expression, error),
+            "preset expression should compile: " + expression + " / " + error);
+    }
     check(
         !invalid.compile("tcp and (udp or", error),
         "invalid expression should fail");

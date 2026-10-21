@@ -8,7 +8,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 
 ## 版本
 
-当前版本：`0.2.7`
+当前版本：`0.2.8`
 
 ## 功能
 
@@ -59,7 +59,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 .\scripts\package-release.ps1
 ```
 
-输出位于 `dist\NetObserver-v0.2.7-win64.zip`，同时生成 SHA256 校验文件。
+输出位于 `dist\NetObserver-v0.2.8-win64.zip`，同时生成 SHA256 校验文件。
 
 ## 使用
 
@@ -71,6 +71,10 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 5. 产生对应流量，然后点击“停止”。
 6. 在“显示过滤”中输入条件并点击“应用过滤”，只改变已经捕获的数据包列表，
    不会重新抓包，也不会丢弃已捕获的数据。
+
+快捷按钮 `ICMP`、`ARP`、`DNS`、`TCP`、`HTTP` 操作的是显示过滤器。它们使用
+显示过滤语法，例如 DNS 为 `dns or udp.port == 53 or tcp.port == 53`，不要
+把 `udp port 53` 这类 BPF 语法直接填入显示过滤框。
 
 点击“打开文件”可以加载已有的 `.pcap` 或 `.pcapng` 文件，加载完成后同样可以
 使用显示过滤器。也可以把文件作为启动参数：

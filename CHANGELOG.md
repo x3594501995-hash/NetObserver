@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.2.8] - 2026-10-21
+
+### Fixed
+
+- Flush the final short packet batch when capture stops, preventing empty or
+  incomplete packet lists after brief captures.
+- Corrected DNS and HTTP display-filter presets to use display-filter syntax.
+- Changed the HTTP display filter to match only packets successfully identified
+  as HTTP application traffic.
+- Added automated BPF syntax and preset-expression tests.
+
 ## [0.2.7] - 2026-10-21
 
 ### Fixed

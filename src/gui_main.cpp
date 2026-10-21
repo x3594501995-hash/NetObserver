@@ -78,9 +78,9 @@ struct FilterPreset {
 constexpr FilterPreset kPresets[] = {
     {L"ICMP", L"icmp"},
     {L"ARP", L"arp"},
-    {L"DNS", L"udp port 53 or tcp port 53"},
+    {L"DNS", L"dns or udp.port == 53 or tcp.port == 53"},
     {L"TCP", L"tcp"},
-    {L"HTTP", L"tcp port 80 or tcp port 8080"},
+    {L"HTTP", L"http"},
 };
 
 struct PacketRecord {
@@ -715,17 +715,20 @@ bool processPacketRecord(std::unique_ptr<PacketRecord> record)
 
 bool postPacketBatch(
     HWND window,
-    std::vector<std::unique_ptr<PacketRecord>>& records)
+    std::vector<std::unique_ptr<PacketRecord>>& records,
+    bool flushWhenStopped = false)
 {
     if (records.empty())
         return true;
-    while (g_app.running.load() &&
-           g_app.pendingBatches.load() >= 2) {
-        Sleep(2);
-    }
-    if (!g_app.running.load()) {
-        records.clear();
-        return true;
+    if (!flushWhenStopped) {
+        while (g_app.running.load() &&
+               g_app.pendingBatches.load() >= 2) {
+            Sleep(2);
+        }
+        if (!g_app.running.load()) {
+            records.clear();
+            return true;
+        }
     }
 
     auto* payload = new std::vector<std::unique_ptr<PacketRecord>>(
@@ -850,7 +853,7 @@ void captureWorker(HWND window, netobserver::AdapterInfo adapter, std::string fi
                 }
             }
 
-            if (!postPacketBatch(window, batch))
+            if (!postPacketBatch(window, batch, true))
                 failed = true;
             if (!engine.flushOutput(error)) {
                 failed = true;
@@ -934,7 +937,7 @@ void loadWorker(HWND window, std::string filePath)
             }
         }
 
-        if (!postPacketBatch(window, batch))
+        if (!postPacketBatch(window, batch, true))
             failed = true;
 
         {
@@ -1193,7 +1196,7 @@ void createHeader(HWND window, HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 10, 260, 30, window, nullptr, instance, nullptr);
     g_app.subtitle = CreateWindowExW(
-        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.7",
+        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.8",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 39, 460, 18, window, nullptr, instance, nullptr);
     g_app.state = CreateWindowExW(

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(NetObserver VERSION 0.2.7 LANGUAGES CXX)
+project(NetObserver VERSION 0.2.8 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -129,5 +129,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(netobserver-flow-tests PRIVATE netobserver_core)
     add_test(NAME netobserver_flow_tests COMMAND netobserver-flow-tests)
+
+    add_executable(netobserver-bpf-tests
+        tests/bpf_filter_tests.cpp
+    )
+    target_link_libraries(netobserver-bpf-tests PRIVATE netobserver_core)
+    add_test(NAME netobserver_bpf_tests COMMAND netobserver-bpf-tests)
 endif()
 
