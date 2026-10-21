@@ -4,6 +4,8 @@
 #include <iostream>
 #include <string>
 
+#include <windows.h>
+
 namespace {
 
 netobserver::ParsedPacket makeTcpPacket(
@@ -69,6 +71,70 @@ int main()
         stream.find("ACK") == std::string::npos) {
         std::cerr << "TCP reassembly mismatch:\n" << stream << "\n";
         return 1;
+    }
+
+    netobserver::FlowTracker overlapTracker;
+    add(
+        overlapTracker,
+        makeTcpPacket(clientIp, 50002, serverIp, 80, 100),
+        "Hello");
+    add(
+        overlapTracker,
+        makeTcpPacket(clientIp, 50002, serverIp, 80, 110),
+        "World");
+    add(
+        overlapTracker,
+        makeTcpPacket(clientIp, 50002, serverIp, 80, 105),
+        " fiveWor");
+    const auto overlapFlows = overlapTracker.statistics();
+    const std::string overlapStream =
+        overlapTracker.followStream(overlapFlows[0].key);
+    if (overlapStream.find("Hello fiveWorld") == std::string::npos) {
+        std::cerr << "overlapping segment reassembly mismatch:\n"
+                  << overlapStream << "\n";
+        return 1;
+    }
+
+    netobserver::FlowTracker wrapTracker;
+    add(
+        wrapTracker,
+        makeTcpPacket(clientIp, 50003, serverIp, 80, 0xFFFFFFFEU),
+        "AB");
+    add(
+        wrapTracker,
+        makeTcpPacket(clientIp, 50003, serverIp, 80, 0),
+        "CD");
+    const auto wrapFlows = wrapTracker.statistics();
+    if (wrapTracker.followStream(wrapFlows[0].key).find("ABCD") ==
+        std::string::npos) {
+        std::cerr << "sequence wrap reassembly mismatch\n";
+        return 1;
+    }
+
+    netobserver::FlowTracker utf8Tracker;
+    add(
+        utf8Tracker,
+        makeTcpPacket(clientIp, 50004, serverIp, 80, 1),
+        "\xE4\xBD\xA0\xE5\xA5\xBD");
+    const auto utf8Flows = utf8Tracker.statistics();
+    if (utf8Tracker.followStream(utf8Flows[0].key).find("你好") ==
+        std::string::npos) {
+        std::cerr << "UTF-8 stream rendering mismatch\n";
+        return 1;
+    }
+
+    if (GetACP() == 936) {
+        netobserver::FlowTracker gbkTracker;
+        add(
+            gbkTracker,
+            makeTcpPacket(clientIp, 50005, serverIp, 80, 1),
+            "\xC4\xE3\xBA\xC3");
+        const auto gbkFlows = gbkTracker.statistics();
+        if (gbkTracker.followStream(gbkFlows[0].key).find("你好") ==
+            std::string::npos) {
+            std::cerr << "GBK stream rendering mismatch\n";
+            return 1;
+        }
     }
 
     netobserver::FlowTracker encodedTracker;

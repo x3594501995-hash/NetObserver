@@ -8,7 +8,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 
 ## 版本
 
-当前版本：`0.2.6`
+当前版本：`0.2.7`
 
 ## 功能
 
@@ -20,9 +20,8 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 - HTTP 和 FTP 基础应用层识别
 - 数据包列表、协议字段、十六进制和统计信息
 - DLT_EN10MB 与 DLT_NULL/DLT_LOOP 链路格式
-- 每次捕获自动保存 pcap
 - 打开已有 `.pcap` 和 `.pcapng` 文件
-- 自动保存 pcapng，并可打开经典 pcap
+- 每次捕获自动保存 pcapng，并可读取经典 pcap
 - DNS、IPv6 和增强 HTTP 字段分析
 - TCP 双向会话跟踪、乱序重组和 Follow Stream
 - 会话流量统计、实时包速率和吞吐量
@@ -36,6 +35,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 - CMake 3.20 或更高版本
 
 抓包通常需要管理员权限。
+官方便携发布包静态链接 MSVC C++ 运行库，但仍需要单独安装 Npcap。
 
 ## 构建
 
@@ -59,7 +59,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 .\scripts\package-release.ps1
 ```
 
-输出位于 `dist\NetObserver-v0.2.6-win64.zip`，同时生成 SHA256 校验文件。
+输出位于 `dist\NetObserver-v0.2.7-win64.zip`，同时生成 SHA256 校验文件。
 
 ## 使用
 
@@ -91,7 +91,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 “完整流”会显示当前 TCP 流中保留的全部载荷。二进制内容将输出完整十六进制；
 为避免界面卡顿，单方向当前最多保留 1 MB。
 
-程序会在当前工作目录的 `captures` 文件夹中保存 `.pcap` 文件。
+程序会在当前工作目录的 `captures` 文件夹中保存 `.pcapng` 文件。
 
 显示过滤示例：
 
@@ -115,12 +115,14 @@ not arp
 
 ## 已知限制
 
-- 当前主要解析 IPv4，IPv6 仅显示基础信息。
-- HTTP/FTP 分析基于单个数据包，尚未实现完整 TCP 流重组。
+- IPv6 已支持基础首部、扩展头、TCP、UDP、DNS 和 ICMPv6，
+  但尚未实现 IPv6 分片重组。
+- HTTP/FTP 字段解析仍以单个数据包为单位；TCP Follow Stream 提供独立的
+  TCP 载荷重组视图，但不等于完整的 HTTP 流解析器。
 - IP 分片暂不重组。
 - 实时捕获默认保存为 pcapng，同时兼容经典 pcap 文件。
 - TCP Follow Stream 仅保留每个方向最多 1 MB。
-- 公开版本发布前仍需补充更多畸形包测试和完整的隐私说明。
+- TLS 和其他加密流量只能显示密文，除非提供对应密钥或协议解析器。
 
 ## License
 

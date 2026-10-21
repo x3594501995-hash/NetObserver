@@ -1,10 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(NetObserver VERSION 0.2.6 LANGUAGES CXX)
+project(NetObserver VERSION 0.2.7 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+if(MSVC)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY
+        "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
 
 set(NPCAP_ROOT "" CACHE PATH "Path to the Npcap SDK or WinPcap Developer's Pack")
 

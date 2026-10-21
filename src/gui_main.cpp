@@ -852,6 +852,13 @@ void captureWorker(HWND window, netobserver::AdapterInfo adapter, std::string fi
 
             if (!postPacketBatch(window, batch))
                 failed = true;
+            if (!engine.flushOutput(error)) {
+                failed = true;
+                postText(
+                    window,
+                    kMessageError,
+                    L"保存抓包文件失败: " + utf8ToWide(error));
+            }
 
             if (!engine.statistics(statistics, error)) {
                 failed = true;
@@ -1186,7 +1193,7 @@ void createHeader(HWND window, HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 10, 260, 30, window, nullptr, instance, nullptr);
     g_app.subtitle = CreateWindowExW(
-        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.6",
+        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.7",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 39, 460, 18, window, nullptr, instance, nullptr);
     g_app.state = CreateWindowExW(

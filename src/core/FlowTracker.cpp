@@ -9,11 +9,16 @@
 #include <unordered_map>
 #include <utility>
 
+#include <windows.h>
+
 namespace netobserver {
 namespace {
 
 constexpr std::size_t kMaximumStreamBytes = 1024U * 1024U;
-constexpr std::size_t kMaximumPendingSegments = 256;
+constexpr std::size_t kMaximumPendingBytesPerDirection = 256U * 1024U;
+constexpr std::size_t kMaximumPendingSegments = 128;
+constexpr std::size_t kMaximumTotalStreamBytes = 128U * 1024U * 1024U;
+constexpr std::size_t kMaximumTotalPendingBytes = 64U * 1024U * 1024U;
 constexpr std::size_t kMaximumFlows = 2000;
 
 struct Endpoint {
@@ -35,20 +40,81 @@ bool endpointLess(const Endpoint& left, const Endpoint& right)
     return left.port < right.port;
 }
 
-std::size_t printableCount(
+bool hasExcessiveControls(
     const std::vector<std::uint8_t>& data,
     std::size_t begin,
     std::size_t end)
 {
-    std::size_t count = 0;
+    std::size_t controls = 0;
     for (std::size_t index = begin; index < end; ++index) {
         const std::uint8_t value = data[index];
-        if (value == '\r' || value == '\n' || value == '\t' ||
-            (value >= 32 && value <= 126)) {
-            ++count;
+        if ((value < 32 && value != '\r' && value != '\n' && value != '\t') ||
+            value == 127) {
+            ++controls;
         }
     }
-    return count;
+    return end > begin && controls * 100 / (end - begin) > 3;
+}
+
+bool convertToUtf8(
+    const std::vector<std::uint8_t>& data,
+    std::size_t begin,
+    std::size_t end,
+    UINT codePage,
+    std::string& output)
+{
+    if (begin >= end)
+        return false;
+    const int sourceLength = static_cast<int>(end - begin);
+    const int wideLength = MultiByteToWideChar(
+        codePage,
+        MB_ERR_INVALID_CHARS,
+        reinterpret_cast<LPCCH>(data.data() + begin),
+        sourceLength,
+        nullptr,
+        0);
+    if (wideLength <= 0)
+        return false;
+
+    std::wstring wide(static_cast<std::size_t>(wideLength), L'\0');
+    if (MultiByteToWideChar(
+            codePage,
+            MB_ERR_INVALID_CHARS,
+            reinterpret_cast<LPCCH>(data.data() + begin),
+            sourceLength,
+            wide.data(),
+            wideLength) <= 0) {
+        return false;
+    }
+
+    const int utf8Length = WideCharToMultiByte(
+        CP_UTF8, 0, wide.data(), wideLength, nullptr, 0, nullptr, nullptr);
+    if (utf8Length <= 0)
+        return false;
+    output.assign(static_cast<std::size_t>(utf8Length), '\0');
+    WideCharToMultiByte(
+        CP_UTF8,
+        0,
+        wide.data(),
+        wideLength,
+        output.data(),
+        utf8Length,
+        nullptr,
+        nullptr);
+    return true;
+}
+
+bool isTextual(
+    const std::vector<std::uint8_t>& data,
+    std::size_t begin,
+    std::size_t end,
+    std::string& converted)
+{
+    if (begin >= end || hasExcessiveControls(data, begin, end))
+        return false;
+    if (convertToUtf8(data, begin, end, CP_UTF8, converted))
+        return true;
+    return convertToUtf8(data, begin, end, CP_ACP, converted);
 }
 
 std::string renderText(
@@ -60,16 +126,25 @@ std::string renderText(
     constexpr std::size_t maximumTextBytes = 256U * 1024U;
     if (!fullContent)
         end = std::min(end, begin + maximumTextBytes);
+
+    std::string converted;
+    if (!isTextual(data, begin, end, converted)) {
+        converted.assign(
+            reinterpret_cast<const char*>(data.data() + begin),
+            end - begin);
+    }
+
     std::string output;
-    output.reserve(end - begin + 32);
-    for (std::size_t index = begin; index < end; ++index) {
-        const std::uint8_t value = data[index];
+    output.reserve(converted.size() + 32);
+    for (std::size_t index = 0; index < converted.size(); ++index) {
+        const unsigned char value =
+            static_cast<unsigned char>(converted[index]);
         if (value == '\r') {
-            if (index + 1 < end && data[index + 1] == '\n')
+            if (index + 1 < converted.size() && converted[index + 1] == '\n')
                 continue;
             output.push_back('\n');
         } else if (value == '\n' || value == '\t' ||
-                   (value >= 32 && value <= 126)) {
+                   value >= 32) {
             output.push_back(static_cast<char>(value));
         } else {
             output.push_back('.');
@@ -167,15 +242,14 @@ std::string renderStream(
         std::string output = renderText(data, 0, bodyStart, fullContent);
         output += "\r\n[响应体 " +
             std::to_string(data.size() - bodyStart) + " bytes]\r\n";
-        const std::size_t printable =
-            printableCount(data, bodyStart, data.size());
         const std::size_t bodySize = data.size() - bodyStart;
         const bool encoded =
             prefix.find("content-encoding: gzip") != std::string::npos ||
             prefix.find("content-encoding: br") != std::string::npos ||
             prefix.find("content-encoding: deflate") != std::string::npos;
         const bool likelyBinary =
-            bodySize > 0 && printable * 100 / bodySize < 75;
+            bodySize > 0 &&
+            hasExcessiveControls(data, bodyStart, data.size());
         if (encoded || likelyBinary) {
             output +=
                 (fullContent
@@ -196,8 +270,8 @@ std::string renderStream(
         return output;
     }
 
-    const std::size_t printable = printableCount(data, 0, data.size());
-    if (printable * 100 / data.size() >= 78)
+    std::string converted;
+    if (isTextual(data, 0, data.size(), converted))
         return renderText(data, 0, data.size(), fullContent);
 
     return
@@ -220,27 +294,31 @@ struct DirectionState {
     std::uint32_t nextSequence = 0;
     std::vector<std::uint8_t> stream;
     std::map<std::uint32_t, std::vector<std::uint8_t>> pending;
+    std::size_t pendingBytes = 0;
 
-    void append(
+    std::size_t append(
         std::uint32_t sequence,
         const std::uint8_t* data,
-        std::size_t length)
+        std::size_t length,
+        std::size_t& streamBudget,
+        std::size_t& pendingBudget)
     {
         if (!data || length == 0 || stream.size() >= kMaximumStreamBytes)
-            return;
+            return 0;
 
         if (!sequenceInitialized) {
             sequenceInitialized = true;
             nextSequence = sequence;
         }
 
+        std::size_t appended = 0;
         std::int32_t difference =
             static_cast<std::int32_t>(sequence - nextSequence);
         if (difference < 0) {
             const std::size_t overlap =
                 static_cast<std::size_t>(-static_cast<std::int64_t>(difference));
             if (overlap >= length)
-                return;
+                return 0;
             data += overlap;
             length -= overlap;
             sequence += static_cast<std::uint32_t>(overlap);
@@ -248,32 +326,79 @@ struct DirectionState {
         }
 
         if (difference == 0) {
-            appendContiguous(data, length);
-            bool progressed = true;
-            while (progressed) {
-                progressed = false;
-                const auto iterator = pending.find(nextSequence);
-                if (iterator == pending.end())
+            appended += appendContiguous(data, length, streamBudget);
+            while (streamBudget > 0 && stream.size() < kMaximumStreamBytes) {
+                auto best = pending.end();
+                std::size_t bestOverlap = 0;
+                for (auto iterator = pending.begin();
+                     iterator != pending.end();
+                     ++iterator) {
+                    const std::int32_t offset = static_cast<std::int32_t>(
+                        iterator->first - nextSequence);
+                    if (offset > 0)
+                        continue;
+                    const std::size_t overlap =
+                        static_cast<std::size_t>(
+                            -static_cast<std::int64_t>(offset));
+                    if (overlap >= iterator->second.size())
+                        continue;
+                    if (best == pending.end() || overlap < bestOverlap) {
+                        best = iterator;
+                        bestOverlap = overlap;
+                    }
+                }
+                if (best == pending.end())
                     break;
-                const auto segment = iterator->second;
-                pending.erase(iterator);
-                appendContiguous(segment.data(), segment.size());
-                progressed = true;
+
+                auto segment = std::move(best->second);
+                pendingBudget += segment.size();
+                pendingBytes -= segment.size();
+                pending.erase(best);
+                appended += appendContiguous(
+                    segment.data() + bestOverlap,
+                    segment.size() - bestOverlap,
+                    streamBudget);
             }
-        } else if (pending.size() < kMaximumPendingSegments) {
+            return appended;
+        }
+
+        auto existing = pending.find(sequence);
+        if (existing != pending.end()) {
+            if (existing->second.size() >= length)
+                return 0;
+            pendingBytes -= existing->second.size();
+            pendingBudget += existing->second.size();
+            pending.erase(existing);
+        }
+
+        const std::size_t perDirectionAvailable =
+            kMaximumPendingBytesPerDirection - pendingBytes;
+        const std::size_t accepted =
+            std::min({length, perDirectionAvailable, pendingBudget});
+        if (accepted > 0 &&
+            pending.size() < kMaximumPendingSegments) {
             pending.emplace(
                 sequence,
-                std::vector<std::uint8_t>(data, data + length));
+                std::vector<std::uint8_t>(data, data + accepted));
+            pendingBytes += accepted;
+            pendingBudget -= accepted;
         }
+        return 0;
     }
 
-    void appendContiguous(const std::uint8_t* data, std::size_t length)
+    std::size_t appendContiguous(
+        const std::uint8_t* data,
+        std::size_t length,
+        std::size_t& streamBudget)
     {
         const std::size_t available =
             kMaximumStreamBytes - stream.size();
-        const std::size_t accepted = std::min(length, available);
+        const std::size_t accepted =
+            std::min({length, available, streamBudget});
         stream.insert(stream.end(), data, data + accepted);
         nextSequence += static_cast<std::uint32_t>(accepted);
+        streamBudget -= accepted;
+        return accepted;
     }
 };
 
@@ -296,6 +421,8 @@ struct Flow {
 
 struct FlowTracker::Impl {
     std::unordered_map<std::string, Flow> flows;
+    std::size_t streamBytes = 0;
+    std::size_t pendingBytes = 0;
 };
 
 FlowTracker::FlowTracker()
@@ -377,15 +504,26 @@ void FlowTracker::addPacket(
     if ((packet.tcpFlags & 0x02U) != 0)
         ++sequence;
     DirectionState& direction = fromA ? flow.aToB : flow.bToA;
-    direction.append(
+    std::size_t streamBudget =
+        kMaximumTotalStreamBytes - impl_->streamBytes;
+    std::size_t pendingBudget =
+        kMaximumTotalPendingBytes - impl_->pendingBytes;
+    const std::size_t appended = direction.append(
         sequence,
         packetData + packet.transportPayloadOffset,
-        length);
+        length,
+        streamBudget,
+        pendingBudget);
+    impl_->streamBytes += appended;
+    impl_->pendingBytes =
+        kMaximumTotalPendingBytes - pendingBudget;
 }
 
 void FlowTracker::clear()
 {
     impl_->flows.clear();
+    impl_->streamBytes = 0;
+    impl_->pendingBytes = 0;
 }
 
 std::vector<FlowStatistics> FlowTracker::statistics() const

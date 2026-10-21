@@ -54,6 +54,7 @@ public:
         std::string& error);
 
     bool statistics(CaptureStatistics& statistics, std::string& error) const;
+    bool flushOutput(std::string& error);
     void breakLoop();
     void close();
 

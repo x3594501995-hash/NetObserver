@@ -128,12 +128,15 @@ int main()
         std::cerr << "pcapng open failed: " << error << "\n";
         return 1;
     }
-    writer.writePacket(
-        header.ts.tv_sec,
-        header.ts.tv_usec,
-        packet.data(),
-        header.caplen,
-        header.len);
+    if (!writer.writePacket(
+            header.ts.tv_sec,
+            header.ts.tv_usec,
+            packet.data(),
+            header.caplen,
+            header.len)) {
+        std::cerr << "pcapng packet write failed\n";
+        return 1;
+    }
     writer.close();
 
     netobserver::CaptureEngine pcapngEngine;

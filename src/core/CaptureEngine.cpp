@@ -270,12 +270,15 @@ CaptureResult CaptureEngine::next(
     }
 
     if (pcapngWriter_) {
-        pcapngWriter_->writePacket(
-            packetHeader->ts.tv_sec,
-            packetHeader->ts.tv_usec,
-            rawPacket,
-            packetHeader->caplen,
-            packetHeader->len);
+        if (!pcapngWriter_->writePacket(
+                packetHeader->ts.tv_sec,
+                packetHeader->ts.tv_usec,
+                rawPacket,
+                packetHeader->caplen,
+                packetHeader->len)) {
+            error = "写入 pcapng 文件失败；请检查磁盘空间和文件权限";
+            return CaptureResult::Error;
+        }
     } else if (dumper_) {
         pcap_dump(
             static_cast<u_char*>(dumper_),
@@ -316,6 +319,20 @@ bool CaptureEngine::statistics(
     statistics.received = captureStatistics.ps_recv;
     statistics.dropped = captureStatistics.ps_drop;
     statistics.interfaceDropped = captureStatistics.ps_ifdrop;
+    return true;
+}
+
+bool CaptureEngine::flushOutput(std::string& error)
+{
+    error.clear();
+    if (pcapngWriter_)
+        return pcapngWriter_->flush(error);
+    if (dumper_ && handle_) {
+        if (pcap_dump_flush(static_cast<pcap_dumper_t*>(dumper_)) == -1) {
+            error = pcap_geterr(static_cast<pcap_t*>(handle_));
+            return false;
+        }
+    }
     return true;
 }
 

@@ -343,16 +343,47 @@ private:
             fail("不支持的比较字段: " + field);
         }
 
-        if (field == "frame.len" ||
+        const bool equalityOnly =
+            field == "ip.addr" || field == "ip.src" || field == "ip.dst" ||
+            field == "ipv6.addr" || field == "ipv6.src" ||
+            field == "ipv6.dst" || field == "port" ||
+            field == "tcp.port" || field == "udp.port" ||
+            field == "protocol" || field == "dns.qry.name" ||
+            field == "http.request.method" ||
+            field == "http.request.uri" || field == "http.host";
+        if (equalityOnly &&
+            node->operation != TokenType::Equal &&
+            node->operation != TokenType::NotEqual) {
+            fail("该字段只支持 == 或 != 比较");
+        }
+
+        const bool numericField =
+            field == "frame.len" ||
             field == "dns.id" ||
-            field == "http.response.code") {
+            field == "http.response.code" ||
+            field == "port" ||
+            field == "tcp.port" ||
+            field == "udp.port";
+        if (numericField) {
+            long long numeric = 0;
             try {
                 std::size_t consumed = 0;
-                (void)std::stoll(node->value, &consumed);
+                numeric = std::stoll(node->value, &consumed);
                 if (consumed != node->value.size())
                     throw std::invalid_argument("suffix");
             } catch (...) {
-                fail("frame.len 后的值必须是整数");
+                fail("数值字段的值必须是非负整数");
+            }
+            if (field == "frame.len" && numeric < 0)
+                fail("frame.len 不能为负数");
+            if ((field == "dns.id" || field == "port" ||
+                 field == "tcp.port" || field == "udp.port") &&
+                (numeric < 0 || numeric > 65535)) {
+                fail("端口或 DNS ID 必须在 0 到 65535 之间");
+            }
+            if (field == "http.response.code" &&
+                (numeric < 0 || numeric > 9999)) {
+                fail("HTTP 状态码必须在 0 到 9999 之间");
             }
         }
         return node;

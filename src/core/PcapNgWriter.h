@@ -19,12 +19,13 @@ public:
         std::uint16_t linkType,
         std::uint32_t snapshotLength,
         std::string& error);
-    void writePacket(
+    bool writePacket(
         std::int64_t seconds,
         std::int64_t microseconds,
         const std::uint8_t* data,
         std::uint32_t capturedLength,
         std::uint32_t originalLength);
+    bool flush(std::string& error);
     void close();
     bool isOpen() const noexcept;
 

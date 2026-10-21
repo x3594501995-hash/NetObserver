@@ -120,6 +120,15 @@ int main()
         !invalid.compile("tcp and (udp or", error),
         "invalid expression should fail");
     check(!error.empty(), "invalid expression should return an error");
+    check(
+        !invalid.compile("tcp.port == 65536", error),
+        "out-of-range TCP port should fail");
+    check(
+        !invalid.compile("dns.id == -1", error),
+        "negative DNS ID should fail");
+    check(
+        !invalid.compile("ip.src > 1", error),
+        "ordering comparison on a text field should fail");
 
     if (failures != 0) {
         std::cerr << failures << " test(s) failed\n";

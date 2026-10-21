@@ -54,7 +54,7 @@ void appendOption(
         block.push_back(0);
 }
 
-void finishBlock(
+bool finishBlock(
     std::vector<std::uint8_t>& block,
     std::ofstream& output)
 {
@@ -67,6 +67,7 @@ void finishBlock(
     output.write(
         reinterpret_cast<const char*>(block.data()),
         static_cast<std::streamsize>(block.size()));
+    return static_cast<bool>(output);
 }
 
 std::vector<std::uint8_t> optionText(const char* text)
@@ -117,10 +118,14 @@ bool PcapNgWriter::open(
     appendU16(shb, 1);
     appendU16(shb, 0);
     appendU64(shb, 0xFFFFFFFFFFFFFFFFULL);
-    appendOption(shb, 4, optionText("NetObserver 0.2.6"));
+    appendOption(shb, 4, optionText("NetObserver 0.2.7"));
     appendU16(shb, 0);
     appendU16(shb, 0);
-    finishBlock(shb, impl_->output);
+    if (!finishBlock(shb, impl_->output)) {
+        error = "写入 pcapng Section Header 失败";
+        close();
+        return false;
+    }
 
     std::vector<std::uint8_t> idb;
     appendU32(idb, 0x00000001);
@@ -132,7 +137,11 @@ bool PcapNgWriter::open(
     appendOption(idb, 9, {6});
     appendU16(idb, 0);
     appendU16(idb, 0);
-    finishBlock(idb, impl_->output);
+    if (!finishBlock(idb, impl_->output)) {
+        error = "写入 pcapng Interface Description 失败";
+        close();
+        return false;
+    }
 
     if (!impl_->output) {
         error = "写入 pcapng 文件头失败";
@@ -143,7 +152,7 @@ bool PcapNgWriter::open(
     return true;
 }
 
-void PcapNgWriter::writePacket(
+bool PcapNgWriter::writePacket(
     std::int64_t seconds,
     std::int64_t microseconds,
     const std::uint8_t* data,
@@ -151,7 +160,7 @@ void PcapNgWriter::writePacket(
     std::uint32_t originalLength)
 {
     if (!isOpen() || !data)
-        return;
+        return false;
 
     const std::uint64_t timestamp =
         static_cast<std::uint64_t>(
@@ -166,11 +175,28 @@ void PcapNgWriter::writePacket(
     appendU32(block, capturedLength);
     appendU32(block, originalLength);
     block.insert(block.end(), data, data + capturedLength);
-    finishBlock(block, impl_->output);
+    if (!finishBlock(block, impl_->output))
+        return false;
 
     ++impl_->packetCount;
-    if (impl_->packetCount % 32 == 0)
+    if (impl_->packetCount % 32 == 0) {
         impl_->output.flush();
+        return static_cast<bool>(impl_->output);
+    }
+    return true;
+}
+
+bool PcapNgWriter::flush(std::string& error)
+{
+    error.clear();
+    if (!isOpen())
+        return true;
+    impl_->output.flush();
+    if (!impl_->output) {
+        error = "刷新 pcapng 文件失败";
+        return false;
+    }
+    return true;
 }
 
 void PcapNgWriter::close()

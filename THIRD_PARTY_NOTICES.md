@@ -12,5 +12,7 @@ Do not redistribute Npcap DLLs, drivers, SDK libraries, or installers unless the
 
 ## Microsoft C++ Runtime
 
-Release packages may require the Microsoft Visual C++ Redistributable or an equivalent runtime deployment strategy.
+Official NetObserver packages from v0.2.7 statically link the Microsoft C++
+runtime. Builds produced with a different CMake configuration may require the
+Microsoft Visual C++ Redistributable.
 

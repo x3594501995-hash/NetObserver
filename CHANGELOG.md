@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.7] - 2026-10-21
+
+### Fixed
+
+- Correctly trims and consumes overlapped out-of-order TCP segments.
+- Added global limits for retained stream and pending-segment memory.
+- Added UTF-8 and system-ANSI text handling for Follow Stream.
+- Propagate pcapng write and flush failures to the capture UI.
+- Validate port, DNS ID, HTTP status and numeric filter ranges.
+- Link the MSVC runtime statically for portable releases.
+- Corrected outdated IPv6, reassembly and pcapng documentation.
+
 ## [0.2.6] - 2026-10-21
 
 ### Fixed
