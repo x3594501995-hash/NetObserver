@@ -53,6 +53,14 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 
 也可以直接双击 `run-gui.cmd`，脚本会先构建再启动程序。
 
+生成 Windows 便携发布包：
+
+```powershell
+.\scripts\package-release.ps1
+```
+
+输出位于 `dist\NetObserver-v0.2.0-win64.zip`，同时生成 SHA256 校验文件。
+
 ## 使用
 
 1. 打开 `NetObserver.exe`。
