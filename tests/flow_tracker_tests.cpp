@@ -71,6 +71,30 @@ int main()
         return 1;
     }
 
+    netobserver::FlowTracker encodedTracker;
+    add(
+        encodedTracker,
+        makeTcpPacket(clientIp, 50001, serverIp, 80, 1000),
+        "GET /compressed HTTP/1.1\r\nHost: lab.local\r\n\r\n");
+    std::string compressed =
+        "HTTP/1.1 200 OK\r\n"
+        "Content-Type: text/html\r\n"
+        "Content-Encoding: gzip\r\n\r\n";
+    compressed.append("\x1F\x8B\x08\x00\x01\x02\x03\x04", 8);
+    add(
+        encodedTracker,
+        makeTcpPacket(serverIp, 80, clientIp, 50001, 3000),
+        compressed);
+    const auto encodedFlows = encodedTracker.statistics();
+    const std::string encodedStream =
+        encodedTracker.followStream(encodedFlows[0].key);
+    if (encodedStream.find("压缩或二进制内容") == std::string::npos ||
+        encodedStream.find("1F 8B") == std::string::npos) {
+        std::cerr << "compressed stream rendering mismatch:\n"
+                  << encodedStream << "\n";
+        return 1;
+    }
+
     std::cout << "Flow tracker tests passed\n";
     return 0;
 }

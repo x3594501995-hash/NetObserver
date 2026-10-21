@@ -227,7 +227,7 @@ void setRunningUi(bool running)
     EnableWindow(g_app.stopButton, running);
     EnableWindow(g_app.openButton, !running);
     for (int id = kIdPresetFirst; id <= kIdPresetLast; ++id)
-        EnableWindow(GetDlgItem(g_app.window, id), !running);
+        EnableWindow(GetDlgItem(g_app.window, id), TRUE);
 
     SetWindowTextW(g_app.state, running ? L"● 正在捕获" : L"● 就绪");
     InvalidateRect(g_app.state, nullptr, TRUE);
@@ -597,24 +597,41 @@ void showFollowStream()
 void filterCurrentFlow()
 {
     const PacketRecord* record = selectedPacketRecord();
-    if (!record || !record->parsed.hasPorts ||
-        (record->parsed.protocol != "TCP" &&
-         record->parsed.protocol != "UDP")) {
-        setStatus(L"请选择一个 TCP 或 UDP 数据包");
+    if (!record) {
+        setStatus(L"请先选择一个数据包");
         return;
     }
 
     const auto& packet = record->parsed;
-    const std::string protocol =
-        packet.protocol == "TCP" ? "tcp" : "udp";
-    const std::string expression =
-        protocol +
-        " and ip.addr == " + packet.sourceIp +
-        " and ip.addr == " + packet.destinationIp +
-        " and " + protocol + ".port == " +
-        std::to_string(packet.sourcePort) +
-        " and " + protocol + ".port == " +
-        std::to_string(packet.destinationPort);
+    std::string expression;
+    if (packet.protocol == "TCP" || packet.protocol == "UDP") {
+        const std::string protocol =
+            packet.protocol == "TCP" ? "tcp" : "udp";
+        expression =
+            protocol +
+            " and ip.addr == " + packet.sourceIp +
+            " and ip.addr == " + packet.destinationIp +
+            " and " + protocol + ".port == " +
+            std::to_string(packet.sourcePort) +
+            " and " + protocol + ".port == " +
+            std::to_string(packet.destinationPort);
+    } else if (
+        (packet.protocol == "ICMP" || packet.protocol == "ICMPv6" ||
+         packet.protocol == "ARP" || packet.protocol == "IGMP") &&
+        !packet.sourceIp.empty() &&
+        !packet.destinationIp.empty()) {
+        const std::string protocol =
+            packet.protocol == "ICMPv6" ? "icmpv6" :
+            packet.protocol == "ICMP" ? "icmp" :
+            packet.protocol == "ARP" ? "arp" : "igmp";
+        expression =
+            protocol +
+            " and ip.addr == " + packet.sourceIp +
+            " and ip.addr == " + packet.destinationIp;
+    } else {
+        setStatus(L"当前数据包没有可用于会话过滤的地址");
+        return;
+    }
     SetWindowTextW(
         g_app.displayFilterEdit,
         utf8ToWide(expression).c_str());
@@ -1154,7 +1171,7 @@ void createHeader(HWND window, HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 10, 260, 30, window, nullptr, instance, nullptr);
     g_app.subtitle = CreateWindowExW(
-        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.1",
+        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.2",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 39, 460, 18, window, nullptr, instance, nullptr);
     g_app.state = CreateWindowExW(

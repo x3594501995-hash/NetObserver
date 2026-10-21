@@ -1,10 +1,11 @@
 param(
-    [string]$Version = "0.2.1"
+    [string]$Version = "0.2.2",
+    [string]$BuildDirectory = "build/vs"
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
-$releaseDir = Join-Path $root "build\vs\Release"
+$releaseDir = Join-Path $root (Join-Path $BuildDirectory "Release")
 $distRoot = Join-Path $root "dist"
 $packageName = "NetObserver-v$Version-win64"
 $stage = Join-Path $distRoot $packageName

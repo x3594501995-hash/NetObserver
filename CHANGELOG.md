@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.2] - 2026-10-21
+
+### Fixed
+
+- Display filter presets now remain usable while capture is running.
+- “Only this conversation” now works for ICMP, ICMPv6, ARP, and IGMP.
+- Follow Stream renders compressed, encrypted, and binary payloads as a
+  bounded hexadecimal preview instead of producing character noise.
+
 ## [0.2.1] - 2026-10-21
 
 ### Fixed

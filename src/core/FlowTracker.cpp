@@ -1,6 +1,8 @@
 #include "core/FlowTracker.h"
 
 #include <algorithm>
+#include <cctype>
+#include <iomanip>
 #include <map>
 #include <memory>
 #include <sstream>
@@ -33,25 +35,159 @@ bool endpointLess(const Endpoint& left, const Endpoint& right)
     return left.port < right.port;
 }
 
-std::string normalizeStream(const std::vector<std::uint8_t>& data)
+std::size_t printableCount(
+    const std::vector<std::uint8_t>& data,
+    std::size_t begin,
+    std::size_t end)
 {
+    std::size_t count = 0;
+    for (std::size_t index = begin; index < end; ++index) {
+        const std::uint8_t value = data[index];
+        if (value == '\r' || value == '\n' || value == '\t' ||
+            (value >= 32 && value <= 126)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+std::string renderText(
+    const std::vector<std::uint8_t>& data,
+    std::size_t begin,
+    std::size_t end)
+{
+    constexpr std::size_t maximumTextBytes = 256U * 1024U;
+    end = std::min(end, begin + maximumTextBytes);
     std::string output;
-    output.reserve(data.size());
-    for (std::size_t index = 0; index < data.size(); ++index) {
+    output.reserve(end - begin + 32);
+    for (std::size_t index = begin; index < end; ++index) {
         const std::uint8_t value = data[index];
         if (value == '\r') {
-            if (index + 1 < data.size() && data[index + 1] == '\n')
+            if (index + 1 < end && data[index + 1] == '\n')
                 continue;
             output.push_back('\n');
-        } else if (value == '\n' || value == '\t') {
-            output.push_back(static_cast<char>(value));
-        } else if (value >= 32 && value <= 126) {
+        } else if (value == '\n' || value == '\t' ||
+                   (value >= 32 && value <= 126)) {
             output.push_back(static_cast<char>(value));
         } else {
             output.push_back('.');
         }
     }
+    if (data.size() > maximumTextBytes && begin == 0)
+        output += "\r\n[文本已截断]";
     return output;
+}
+
+std::string hexPreview(
+    const std::vector<std::uint8_t>& data,
+    std::size_t begin,
+    std::size_t end,
+    std::size_t maximumBytes = 256)
+{
+    std::ostringstream output;
+    output << std::hex << std::uppercase;
+    const std::size_t shownEnd = std::min(end, begin + maximumBytes);
+    for (std::size_t offset = begin; offset < shownEnd; offset += 16) {
+        output << std::setw(8) << std::setfill('0')
+               << static_cast<std::uint32_t>(offset - begin) << "  ";
+        for (std::size_t index = 0; index < 16; ++index) {
+            if (offset + index < shownEnd) {
+                output << std::setw(2)
+                       << static_cast<unsigned>(data[offset + index]) << ' ';
+            } else {
+                output << "   ";
+            }
+        }
+        output << " ";
+        for (std::size_t index = 0;
+             index < 16 && offset + index < shownEnd;
+             ++index) {
+            const std::uint8_t value = data[offset + index];
+            output << static_cast<char>(
+                value >= 32 && value <= 126 ? value : '.');
+        }
+        output << "\r\n";
+    }
+    if (end - begin > maximumBytes)
+        output << "... 其余 " << std::dec << (end - begin - maximumBytes)
+               << " 字节未显示\r\n";
+    return output.str();
+}
+
+std::string lowerPrefix(
+    const std::vector<std::uint8_t>& data,
+    std::size_t begin,
+    std::size_t end)
+{
+    std::string output;
+    for (std::size_t index = begin;
+         index < end && output.size() < 4096;
+         ++index) {
+        output.push_back(static_cast<char>(data[index]));
+    }
+    std::transform(
+        output.begin(),
+        output.end(),
+        output.begin(),
+        [](unsigned char character) {
+            return static_cast<char>(std::tolower(character));
+        });
+    return output;
+}
+
+std::string renderStream(const std::vector<std::uint8_t>& data)
+{
+    if (data.empty())
+        return "[无数据]";
+
+    const std::string prefix = lowerPrefix(data, 0, data.size());
+    const bool httpLike =
+        prefix.rfind("get ", 0) == 0 ||
+        prefix.rfind("post ", 0) == 0 ||
+        prefix.rfind("head ", 0) == 0 ||
+        prefix.rfind("put ", 0) == 0 ||
+        prefix.rfind("http/", 0) == 0;
+    const std::string separator = "\r\n\r\n";
+    std::size_t bodyStart = std::string::npos;
+    if (httpLike) {
+        for (std::size_t index = 0; index + 3 < data.size(); ++index) {
+            if (data[index] == '\r' && data[index + 1] == '\n' &&
+                data[index + 2] == '\r' && data[index + 3] == '\n') {
+                bodyStart = index + 4;
+                break;
+            }
+        }
+    }
+
+    if (bodyStart != std::string::npos) {
+        std::string output = renderText(data, 0, bodyStart);
+        output += "\r\n[响应体 " +
+            std::to_string(data.size() - bodyStart) + " bytes]\r\n";
+        const std::size_t printable =
+            printableCount(data, bodyStart, data.size());
+        const std::size_t bodySize = data.size() - bodyStart;
+        const bool encoded =
+            prefix.find("content-encoding: gzip") != std::string::npos ||
+            prefix.find("content-encoding: br") != std::string::npos ||
+            prefix.find("content-encoding: deflate") != std::string::npos;
+        const bool likelyBinary =
+            bodySize > 0 && printable * 100 / bodySize < 75;
+        if (encoded || likelyBinary) {
+            output += "[压缩或二进制内容，显示十六进制预览]\r\n";
+            output += hexPreview(data, bodyStart, data.size());
+        } else {
+            output += renderText(data, bodyStart, data.size());
+        }
+        return output;
+    }
+
+    const std::size_t printable = printableCount(data, 0, data.size());
+    if (printable * 100 / data.size() >= 78)
+        return renderText(data, 0, data.size());
+
+    return "[二进制或加密封装数据，共 " +
+        std::to_string(data.size()) + " bytes]\r\n" +
+        hexPreview(data, 0, data.size());
 }
 
 struct DirectionState {
@@ -277,9 +413,9 @@ std::string FlowTracker::followStream(const std::string& key) const
     }
 
     output << "===== A -> B =====\r\n"
-           << normalizeStream(flow.aToB.stream)
+           << renderStream(flow.aToB.stream)
            << "\r\n\r\n===== B -> A =====\r\n"
-           << normalizeStream(flow.bToA.stream)
+           << renderStream(flow.bToA.stream)
            << "\r\n";
     return output.str();
 }
