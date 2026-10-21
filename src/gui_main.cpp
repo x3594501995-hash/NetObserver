@@ -118,6 +118,7 @@ struct AppState {
     netobserver::DisplayFilter displayFilter;
     netobserver::FlowTracker flowTracker;
     std::atomic_bool running{false};
+    std::atomic<int> pendingBatches{0};
     bool loadingOffline = false;
     std::thread worker;
     std::mutex engineMutex;
@@ -694,13 +695,24 @@ bool postPacketBatch(
 {
     if (records.empty())
         return true;
+    while (g_app.running.load() &&
+           g_app.pendingBatches.load() >= 2) {
+        Sleep(2);
+    }
+    if (!g_app.running.load()) {
+        records.clear();
+        return true;
+    }
+
     auto* payload = new std::vector<std::unique_ptr<PacketRecord>>(
         std::move(records));
+    g_app.pendingBatches.fetch_add(1);
     if (!PostMessageW(
             window,
             kMessagePacketBatch,
             0,
             reinterpret_cast<LPARAM>(payload))) {
+        g_app.pendingBatches.fetch_sub(1);
         delete payload;
         return false;
     }
@@ -1142,7 +1154,7 @@ void createHeader(HWND window, HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 10, 260, 30, window, nullptr, instance, nullptr);
     g_app.subtitle = CreateWindowExW(
-        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.0",
+        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.1",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 39, 460, 18, window, nullptr, instance, nullptr);
     g_app.state = CreateWindowExW(
@@ -1540,6 +1552,7 @@ LRESULT CALLBACK windowProcedure(
         return 0;
     }
     case kMessagePacketBatch: {
+        g_app.pendingBatches.fetch_sub(1);
         std::unique_ptr<std::vector<std::unique_ptr<PacketRecord>>> batch(
             reinterpret_cast<
                 std::vector<std::unique_ptr<PacketRecord>>*>(lParam));

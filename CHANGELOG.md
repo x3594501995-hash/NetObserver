@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.1] - 2026-10-21
+
+### Fixed
+
+- Prevented high-rate packet batches from delaying the Stop button.
+- Limited outstanding UI batches so capture cancellation remains responsive.
+
 ## [0.2.0] - 2026-10-21
 
 ### Added
