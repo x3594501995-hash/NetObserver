@@ -21,6 +21,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 - 数据包列表、协议字段、十六进制和统计信息
 - DLT_EN10MB 与 DLT_NULL/DLT_LOOP 链路格式
 - 每次捕获自动保存 pcap
+- 打开已有 `.pcap` 和 `.pcapng` 文件
 
 ## 系统要求
 
@@ -58,6 +59,13 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 6. 在“显示过滤”中输入条件并点击“应用过滤”，只改变已经捕获的数据包列表，
    不会重新抓包，也不会丢弃已捕获的数据。
 
+点击“打开 pcap”可以加载已有的 `.pcap` 或 `.pcapng` 文件，加载完成后同样可以
+使用显示过滤器。也可以把文件作为启动参数：
+
+```powershell
+.\build\vs\Release\NetObserver.exe .\captures\example.pcapng
+```
+
 程序会在当前工作目录的 `captures` 文件夹中保存 `.pcap` 文件。
 
 显示过滤示例：
@@ -81,6 +89,7 @@ not arp
 - 当前主要解析 IPv4，IPv6 仅显示基础信息。
 - HTTP/FTP 分析基于单个数据包，尚未实现完整 TCP 流重组。
 - IP 分片暂不重组。
+- 可以读取 pcapng，但当前实时捕获仍保存为经典 pcap。
 - 公开版本发布前仍需补充更多畸形包测试和完整的隐私说明。
 
 ## License

@@ -41,6 +41,7 @@ public:
         const AdapterInfo& adapter,
         std::string& error,
         const CaptureOptions& options = {});
+    bool openOffline(const std::string& filePath, std::string& error);
     bool setFilter(const std::string& bpfExpression, std::string& error);
     bool startPcapDump(const std::string& filePath, std::string& error);
 
@@ -54,12 +55,14 @@ public:
     void close();
 
     bool isOpen() const noexcept;
+    bool isOffline() const noexcept;
     int dataLinkType() const noexcept;
     const std::string& adapterName() const noexcept;
 
 private:
     void* handle_ = nullptr;
     void* dumper_ = nullptr;
+    bool offline_ = false;
     std::string adapterName_;
     std::string adapterDescription_;
     std::uint64_t nextPacketNumber_ = 1;

@@ -89,7 +89,7 @@ add_executable(NetObserver WIN32
     src/gui_main.cpp
     resources/version.rc
 )
-target_link_libraries(NetObserver PRIVATE netobserver_core comctl32)
+target_link_libraries(NetObserver PRIVATE netobserver_core comctl32 comdlg32 shell32)
 target_compile_definitions(NetObserver PRIVATE UNICODE _UNICODE)
 
 if(MSVC)
@@ -110,5 +110,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(netobserver-filter-tests PRIVATE netobserver_core)
     add_test(NAME netobserver_filter_tests COMMAND netobserver-filter-tests)
+
+    add_executable(netobserver-offline-tests
+        tests/offline_capture_tests.cpp
+    )
+    target_link_libraries(netobserver-offline-tests PRIVATE netobserver_core)
+    add_test(NAME netobserver_offline_tests COMMAND netobserver-offline-tests)
 endif()
 

@@ -4,6 +4,8 @@
 
 #include <windows.h>
 #include <commctrl.h>
+#include <commdlg.h>
+#include <shellapi.h>
 #include <windowsx.h>
 
 #include <algorithm>
@@ -44,11 +46,13 @@ constexpr int kIdPcapPath = 1017;
 constexpr int kIdStatistics = 1018;
 constexpr int kIdDisplayFilter = 1019;
 constexpr int kIdApplyFilter = 1020;
+constexpr int kIdOpenPcap = 1021;
 
 constexpr UINT kMessageStarted = WM_APP + 1;
 constexpr UINT kMessageError = WM_APP + 2;
 constexpr UINT kMessageStopped = WM_APP + 3;
 constexpr UINT kMessagePacket = WM_APP + 4;
+constexpr UINT kMessageOfflineLoaded = WM_APP + 5;
 
 constexpr COLORREF kBackgroundColor = RGB(243, 246, 250);
 constexpr COLORREF kHeaderColor = RGB(24, 42, 75);
@@ -87,6 +91,7 @@ struct AppState {
     HWND startButton = nullptr;
     HWND stopButton = nullptr;
     HWND clearButton = nullptr;
+    HWND openButton = nullptr;
     HWND packetList = nullptr;
     HWND displayFilterEdit = nullptr;
     HWND applyFilterButton = nullptr;
@@ -101,6 +106,7 @@ struct AppState {
     std::vector<std::unique_ptr<PacketRecord>> packets;
     netobserver::DisplayFilter displayFilter;
     std::atomic_bool running{false};
+    bool loadingOffline = false;
     std::thread worker;
     std::mutex engineMutex;
     netobserver::CaptureEngine* activeEngine = nullptr;
@@ -162,6 +168,22 @@ std::string windowTextUtf8(HWND window)
     return output;
 }
 
+std::string wideToUtf8(const std::wstring& input)
+{
+    if (input.empty())
+        return {};
+    const int size = WideCharToMultiByte(
+        CP_UTF8, 0, input.data(), static_cast<int>(input.size()),
+        nullptr, 0, nullptr, nullptr);
+    if (size <= 0)
+        return {};
+    std::string output(static_cast<std::size_t>(size), '\0');
+    WideCharToMultiByte(
+        CP_UTF8, 0, input.data(), static_cast<int>(input.size()),
+        output.data(), size, nullptr, nullptr);
+    return output;
+}
+
 void setStatus(const std::wstring& text)
 {
     SetWindowTextW(g_app.statusLabel, text.c_str());
@@ -174,6 +196,7 @@ void setRunningUi(bool running)
     EnableWindow(g_app.filterEdit, !running);
     EnableWindow(g_app.startButton, !running);
     EnableWindow(g_app.stopButton, running);
+    EnableWindow(g_app.openButton, !running);
     for (int id = kIdPresetFirst; id <= kIdPresetLast; ++id)
         EnableWindow(GetDlgItem(g_app.window, id), !running);
 
@@ -618,6 +641,116 @@ void captureWorker(HWND window, netobserver::AdapterInfo adapter, std::string fi
         delete result;
 }
 
+void loadWorker(HWND window, std::string filePath)
+{
+    netobserver::CaptureEngine engine;
+    std::string error;
+    bool failed = false;
+
+    if (!engine.openOffline(filePath, error)) {
+        failed = true;
+        postText(window, kMessageError, L"打开抓包文件失败: " + utf8ToWide(error));
+    } else {
+        {
+            std::lock_guard<std::mutex> lock(g_app.engineMutex);
+            g_app.activeEngine = &engine;
+        }
+
+        while (g_app.running.load()) {
+            std::vector<std::uint8_t> bytes;
+            netobserver::ParsedPacket metadata;
+            error.clear();
+            const auto result = engine.next(bytes, metadata, error);
+            if (result == netobserver::CaptureResult::Timeout)
+                continue;
+            if (result == netobserver::CaptureResult::End)
+                break;
+            if (result == netobserver::CaptureResult::Error) {
+                failed = true;
+                postText(window, kMessageError, L"读取抓包文件失败: " + utf8ToWide(error));
+                break;
+            }
+
+            auto record = std::make_unique<PacketRecord>();
+            record->bytes = std::move(bytes);
+            record->parsed = netobserver::PacketParser::parsePacket(
+                record->bytes.data(),
+                record->bytes.size(),
+                metadata.originalLength,
+                engine.dataLinkType());
+            record->parsed.number = metadata.number;
+            record->parsed.timestampSeconds = metadata.timestampSeconds;
+            record->parsed.timestampMicroseconds = metadata.timestampMicroseconds;
+            auto* raw = record.release();
+            if (!PostMessageW(window, kMessagePacket, 0, reinterpret_cast<LPARAM>(raw))) {
+                delete raw;
+                failed = true;
+                break;
+            }
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(g_app.engineMutex);
+            g_app.activeEngine = nullptr;
+        }
+    }
+
+    g_app.running.store(false);
+    engine.close();
+    if (!failed)
+        PostMessageW(window, kMessageOfflineLoaded, 0, 0);
+}
+
+std::wstring choosePcapFile(HWND owner)
+{
+    std::vector<wchar_t> fileName(32768, L'\0');
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = owner;
+    dialog.lpstrFilter =
+        L"抓包文件 (*.pcap;*.pcapng)\0*.pcap;*.pcapng\0"
+        L"所有文件 (*.*)\0*.*\0\0";
+    dialog.lpstrFile = fileName.data();
+    dialog.nMaxFile = static_cast<DWORD>(fileName.size());
+    dialog.lpstrTitle = L"打开抓包文件";
+    dialog.Flags =
+        OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
+        OFN_HIDEREADONLY | OFN_NOCHANGEDIR;
+    if (!GetOpenFileNameW(&dialog))
+        return {};
+    return fileName.data();
+}
+
+void beginLoadPcap(HWND window, const std::wstring& path)
+{
+    if (g_app.running.load())
+        return;
+    if (path.empty())
+        return;
+    if (g_app.worker.joinable())
+        g_app.worker.join();
+
+    resetPackets();
+    const std::wstring fileName =
+        std::filesystem::path(path).filename().wstring();
+    SetWindowTextW(g_app.pcapPath, (L"文件: " + fileName).c_str());
+
+    g_app.running.store(true);
+    g_app.loadingOffline = true;
+    setRunningUi(true);
+    SetWindowTextW(g_app.state, L"● 读取文件");
+    setStatus(L"正在读取抓包文件...");
+    g_app.worker = std::thread(
+        loadWorker,
+        window,
+        wideToUtf8(path));
+}
+
+void openPcapFile(HWND window)
+{
+    beginLoadPcap(window, choosePcapFile(window));
+}
+
 void stopCapture()
 {
     g_app.running.store(false);
@@ -647,6 +780,7 @@ void startCapture(HWND window)
     const auto adapter = g_app.adapters[selection];
     const std::string filter = windowTextUtf8(g_app.filterEdit);
     g_app.running.store(true);
+    g_app.loadingOffline = false;
     setRunningUi(true);
     setStatus(L"正在打开网卡并创建 pcap 文件...");
     g_app.worker = std::thread(captureWorker, window, adapter, filter);
@@ -688,11 +822,14 @@ void layoutControls(HWND window)
         controlWidth, 180, SWP_NOZORDER);
     SetWindowPos(
         g_app.refreshButton, nullptr, controlX, contentTop + 92,
-        100, 28, SWP_NOZORDER);
+        78, 28, SWP_NOZORDER);
+    SetWindowPos(
+        g_app.openButton, nullptr, controlX + 82, contentTop + 92,
+        78, 28, SWP_NOZORDER);
     SetWindowPos(
         g_app.clearButton, nullptr,
-        controlX + controlWidth - 100, contentTop + 92,
-        100, 28, SWP_NOZORDER);
+        controlX + 164, contentTop + 92,
+        84, 28, SWP_NOZORDER);
     SetWindowPos(
         g_app.filterEdit, nullptr, controlX, contentTop + 160,
         controlWidth, 28, SWP_NOZORDER);
@@ -824,11 +961,15 @@ void createControls(HWND window)
     g_app.refreshButton = CreateWindowExW(
         0, L"BUTTON", L"刷新网卡",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-        24, 168, 100, 28, window, controlId(kIdRefresh), instance, nullptr);
+        24, 168, 78, 28, window, controlId(kIdRefresh), instance, nullptr);
+    g_app.openButton = CreateWindowExW(
+        0, L"BUTTON", L"打开 pcap",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        106, 168, 78, 28, window, controlId(kIdOpenPcap), instance, nullptr);
     g_app.clearButton = CreateWindowExW(
         0, L"BUTTON", L"清空结果",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
-        172, 168, 100, 28, window, controlId(kIdClear), instance, nullptr);
+        188, 168, 84, 28, window, controlId(kIdClear), instance, nullptr);
     g_app.filterEdit = CreateWindowExW(
         WS_EX_CLIENTEDGE, L"EDIT",
         L"",
@@ -910,6 +1051,7 @@ void createControls(HWND window)
     SetWindowFont(g_app.displayFilterEdit, g_app.uiFont, TRUE);
     SetWindowFont(g_app.applyFilterButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.refreshButton, g_app.uiFont, TRUE);
+    SetWindowFont(g_app.openButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.clearButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.startButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.stopButton, g_app.uiFont, TRUE);
@@ -1050,6 +1192,10 @@ LRESULT CALLBACK windowProcedure(
             setStatus(L"捕获结果已清空");
             return 0;
         }
+        if (id == kIdOpenPcap) {
+            openPcapFile(window);
+            return 0;
+        }
         if (id == kIdApplyFilter) {
             applyDisplayFilter();
             return 0;
@@ -1110,7 +1256,10 @@ LRESULT CALLBACK windowProcedure(
         if (packetMatchesDisplayFilter(*raw))
             addPacket(raw);
         refreshStatistics();
-        setStatus(L"正在捕获数据包");
+        setStatus(
+            g_app.loadingOffline
+                ? L"正在读取抓包文件"
+                : L"正在捕获数据包");
         return 0;
     }
     case kMessageStopped: {
@@ -1126,6 +1275,15 @@ LRESULT CALLBACK windowProcedure(
         setStatus(L"捕获已停止");
         return 0;
     }
+    case kMessageOfflineLoaded:
+        g_app.running.store(false);
+        g_app.loadingOffline = false;
+        setRunningUi(false);
+        setStatus(
+            L"抓包文件加载完成，共 " +
+            std::to_wstring(g_app.totalPackets) +
+            L" 个数据包");
+        return 0;
     case WM_CLOSE:
         stopCapture();
         DestroyWindow(window);
@@ -1203,6 +1361,14 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         return 1;
     ShowWindow(window, showCommand);
     UpdateWindow(window);
+
+    int argumentCount = 0;
+    LPWSTR* arguments = CommandLineToArgvW(GetCommandLineW(), &argumentCount);
+    if (arguments) {
+        if (argumentCount > 1)
+            beginLoadPcap(window, arguments[1]);
+        LocalFree(arguments);
+    }
 
     MSG message{};
     while (GetMessageW(&message, nullptr, 0, 0) > 0) {

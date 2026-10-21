@@ -87,6 +87,32 @@ bool CaptureEngine::open(
     adapterName_ = adapter.name;
     adapterDescription_ = adapter.description;
     nextPacketNumber_ = 1;
+    offline_ = false;
+    return true;
+}
+
+bool CaptureEngine::openOffline(
+    const std::string& filePath,
+    std::string& error)
+{
+    error.clear();
+    close();
+    if (filePath.empty()) {
+        error = "抓包文件路径为空";
+        return false;
+    }
+
+    char errorBuffer[PCAP_ERRBUF_SIZE]{};
+    handle_ = pcap_open_offline(filePath.c_str(), errorBuffer);
+    if (!handle_) {
+        error = errorBuffer;
+        return false;
+    }
+
+    adapterName_ = filePath;
+    adapterDescription_ = "Offline capture";
+    nextPacketNumber_ = 1;
+    offline_ = true;
     return true;
 }
 
@@ -97,6 +123,10 @@ bool CaptureEngine::setFilter(
     error.clear();
     if (!handle_) {
         error = "抓包网卡尚未打开";
+        return false;
+    }
+    if (offline_) {
+        error = "离线抓包文件不能设置实时捕获过滤器";
         return false;
     }
     if (bpfExpression.empty())
@@ -141,6 +171,10 @@ bool CaptureEngine::startPcapDump(
     error.clear();
     if (!handle_) {
         error = "抓包网卡尚未打开";
+        return false;
+    }
+    if (offline_) {
+        error = "不能向离线抓包文件写入新的捕获数据";
         return false;
     }
     if (dumper_) {
@@ -252,11 +286,17 @@ void CaptureEngine::close()
     adapterName_.clear();
     adapterDescription_.clear();
     nextPacketNumber_ = 1;
+    offline_ = false;
 }
 
 bool CaptureEngine::isOpen() const noexcept
 {
     return handle_ != nullptr;
+}
+
+bool CaptureEngine::isOffline() const noexcept
+{
+    return offline_;
 }
 
 int CaptureEngine::dataLinkType() const noexcept

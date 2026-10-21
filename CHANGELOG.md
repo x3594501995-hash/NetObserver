@@ -11,6 +11,8 @@
 - Multithreaded GUI with packet list, protocol tree, hex view, and statistics
 - Capture-time BPF filtering separated from post-capture display filtering
 - Display filter expressions with logical operators and common protocol fields
+- Open existing pcap and pcapng capture files
+- Apply display filters to offline captures and startup file arguments
 - Automatic pcap export
 - DLT_NULL and DLT_LOOP support
 - Protocol parser tests
