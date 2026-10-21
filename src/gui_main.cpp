@@ -1,4 +1,5 @@
 #include "core/CaptureEngine.h"
+#include "core/DisplayFilter.h"
 #include "core/PacketParser.h"
 
 #include <windows.h>
@@ -41,6 +42,8 @@ constexpr int kIdClear = 1015;
 constexpr int kIdTabs = 1016;
 constexpr int kIdPcapPath = 1017;
 constexpr int kIdStatistics = 1018;
+constexpr int kIdDisplayFilter = 1019;
+constexpr int kIdApplyFilter = 1020;
 
 constexpr UINT kMessageStarted = WM_APP + 1;
 constexpr UINT kMessageError = WM_APP + 2;
@@ -85,6 +88,8 @@ struct AppState {
     HWND stopButton = nullptr;
     HWND clearButton = nullptr;
     HWND packetList = nullptr;
+    HWND displayFilterEdit = nullptr;
+    HWND applyFilterButton = nullptr;
     HWND tabs = nullptr;
     HWND detailsTree = nullptr;
     HWND hexEdit = nullptr;
@@ -94,12 +99,14 @@ struct AppState {
 
     std::vector<netobserver::AdapterInfo> adapters;
     std::vector<std::unique_ptr<PacketRecord>> packets;
+    netobserver::DisplayFilter displayFilter;
     std::atomic_bool running{false};
     std::thread worker;
     std::mutex engineMutex;
     netobserver::CaptureEngine* activeEngine = nullptr;
 
     std::uint64_t totalPackets = 0;
+    std::uint64_t visiblePackets = 0;
     std::uint64_t totalBytes = 0;
     std::uint64_t tcp = 0;
     std::uint64_t udp = 0;
@@ -194,7 +201,8 @@ std::wstring statisticsText(
     netobserver::CaptureStatistics driver = {})
 {
     std::wostringstream output;
-    output << L"数据包    " << g_app.totalPackets << L"\r\n"
+    output << L"显示/捕获 " << g_app.visiblePackets
+           << L" / " << g_app.totalPackets << L"\r\n"
            << L"总字节    " << g_app.totalBytes << L"\r\n"
            << L"TCP       " << g_app.tcp << L"\r\n"
            << L"UDP       " << g_app.udp << L"\r\n"
@@ -279,6 +287,7 @@ void resetPackets()
 {
     g_app.packets.clear();
     g_app.totalPackets = 0;
+    g_app.visiblePackets = 0;
     g_app.totalBytes = 0;
     g_app.tcp = 0;
     g_app.udp = 0;
@@ -406,6 +415,7 @@ void addPacket(PacketRecord* record)
     const int inserted = ListView_InsertItem(g_app.packetList, &item);
     if (inserted < 0)
         return;
+    ++g_app.visiblePackets;
     const wchar_t* values[] = {
         time.c_str(), source.c_str(), destination.c_str(),
         protocol.c_str(), sourcePort.c_str(), destinationPort.c_str(),
@@ -443,6 +453,45 @@ void updateSelection()
     populateDetailsTree(*record);
     const std::wstring hex = packetHex(*record);
     SetWindowTextW(g_app.hexEdit, hex.c_str());
+}
+
+bool packetMatchesDisplayFilter(const PacketRecord& record)
+{
+    return g_app.displayFilter.matches(record.parsed);
+}
+
+void rebuildPacketList()
+{
+    ListView_DeleteAllItems(g_app.packetList);
+    TreeView_DeleteAllItems(g_app.detailsTree);
+    SetWindowTextW(g_app.hexEdit, L"");
+    g_app.visiblePackets = 0;
+
+    for (const auto& record : g_app.packets) {
+        if (packetMatchesDisplayFilter(*record))
+            addPacket(record.get());
+    }
+    refreshStatistics();
+}
+
+bool applyDisplayFilter()
+{
+    const std::string expression =
+        windowTextUtf8(g_app.displayFilterEdit);
+    netobserver::DisplayFilter nextFilter;
+    std::string error;
+    if (!nextFilter.compile(expression, error)) {
+        setStatus(L"显示过滤错误: " + utf8ToWide(error));
+        return false;
+    }
+
+    g_app.displayFilter = std::move(nextFilter);
+    rebuildPacketList();
+    setStatus(
+        expression.empty()
+            ? L"显示过滤已清空"
+            : L"显示过滤已应用");
+    return true;
 }
 
 void setActiveTab(int index)
@@ -676,15 +725,30 @@ void layoutControls(HWND window)
         controlX, contentBottom - 54,
         controlWidth, 32, SWP_NOZORDER);
 
-    const int listHeight =
-        std::max(180, static_cast<int>((contentBottom - contentTop) * 0.55));
+    const int displayFilterY = contentTop;
+    const int filterButtonWidth = 82;
+    SetWindowPos(
+        g_app.displayFilterEdit, nullptr,
+        rightX + 70, displayFilterY,
+        std::max(140, rightWidth - 70 - filterButtonWidth - 6), 28,
+        SWP_NOZORDER);
+    SetWindowPos(
+        g_app.applyFilterButton, nullptr,
+        rightX + rightWidth - filterButtonWidth,
+        displayFilterY, filterButtonWidth, 28, SWP_NOZORDER);
+
+    const int listTop = contentTop + 36;
+    const int remainingHeight = contentBottom - listTop;
+    const int listHeight = std::max(
+        160,
+        static_cast<int>(remainingHeight * 0.56));
     SetWindowPos(
         g_app.packetList, nullptr,
-        rightX, contentTop, rightWidth, listHeight, SWP_NOZORDER);
+        rightX, listTop, rightWidth, listHeight, SWP_NOZORDER);
     SetWindowPos(
         g_app.tabs, nullptr,
-        rightX, contentTop + listHeight + 8,
-        rightWidth, std::max(130, contentBottom - contentTop - listHeight - 8),
+        rightX, listTop + listHeight + 8,
+        rightWidth, std::max(130, contentBottom - listTop - listHeight - 8),
         SWP_NOZORDER);
 
     RECT page{};
@@ -749,9 +813,9 @@ void createControls(HWND window)
         WS_CHILD | WS_VISIBLE,
         24, 100, 200, 20, window, nullptr, instance, nullptr);
     CreateWindowExW(
-        0, L"STATIC", L"BPF 过滤表达式",
+        0, L"STATIC", L"BPF 捕获过滤（可留空）",
         WS_CHILD | WS_VISIBLE,
-        24, 204, 200, 20, window, nullptr, instance, nullptr);
+        24, 204, 248, 20, window, nullptr, instance, nullptr);
 
     g_app.adapterCombo = CreateWindowExW(
         WS_EX_CLIENTEDGE, L"COMBOBOX", nullptr,
@@ -767,7 +831,7 @@ void createControls(HWND window)
         172, 168, 100, 28, window, controlId(kIdClear), instance, nullptr);
     g_app.filterEdit = CreateWindowExW(
         WS_EX_CLIENTEDGE, L"EDIT",
-        L"tcp or udp or icmp or arp or igmp",
+        L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
         24, 236, 248, 28, window, controlId(kIdFilter), instance, nullptr);
 
@@ -798,10 +862,23 @@ void createControls(HWND window)
         WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS,
         24, 674, 248, 28, window, controlId(kIdPcapPath), instance, nullptr);
 
+    CreateWindowExW(
+        0, L"STATIC", L"显示过滤",
+        WS_CHILD | WS_VISIBLE,
+        300, 79, 66, 22, window, nullptr, instance, nullptr);
+    g_app.displayFilterEdit = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL,
+        370, 76, 800, 28, window, controlId(kIdDisplayFilter), instance, nullptr);
+    g_app.applyFilterButton = CreateWindowExW(
+        0, L"BUTTON", L"应用过滤",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        1175, 76, 82, 28, window, controlId(kIdApplyFilter), instance, nullptr);
+
     g_app.packetList = CreateWindowExW(
         WS_EX_CLIENTEDGE, WC_LISTVIEWW, nullptr,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | LVS_REPORT | LVS_SHOWSELALWAYS,
-        300, 76, 960, 330, window, controlId(kIdPacketList), instance, nullptr);
+        300, 112, 960, 310, window, controlId(kIdPacketList), instance, nullptr);
     g_app.tabs = CreateWindowExW(
         0, WC_TABCONTROLW, nullptr,
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
@@ -830,6 +907,8 @@ void createControls(HWND window)
 
     SetWindowFont(g_app.adapterCombo, g_app.uiFont, TRUE);
     SetWindowFont(g_app.filterEdit, g_app.uiFont, TRUE);
+    SetWindowFont(g_app.displayFilterEdit, g_app.uiFont, TRUE);
+    SetWindowFont(g_app.applyFilterButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.refreshButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.clearButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.startButton, g_app.uiFont, TRUE);
@@ -971,10 +1050,17 @@ LRESULT CALLBACK windowProcedure(
             setStatus(L"捕获结果已清空");
             return 0;
         }
+        if (id == kIdApplyFilter) {
+            applyDisplayFilter();
+            return 0;
+        }
         if (id >= kIdPresetFirst && id <= kIdPresetLast) {
             const int index = id - kIdPresetFirst;
-            SetWindowTextW(g_app.filterEdit, kPresets[index].expression);
-            SetFocus(g_app.filterEdit);
+            SetWindowTextW(
+                g_app.displayFilterEdit,
+                kPresets[index].expression);
+            applyDisplayFilter();
+            SetFocus(g_app.displayFilterEdit);
             return 0;
         }
         break;
@@ -1020,8 +1106,10 @@ LRESULT CALLBACK windowProcedure(
             return 0;
         auto* raw = record.get();
         g_app.packets.push_back(std::move(record));
-        addPacket(raw);
         countPacket(raw->parsed);
+        if (packetMatchesDisplayFilter(*raw))
+            addPacket(raw);
+        refreshStatistics();
         setStatus(L"正在捕获数据包");
         return 0;
     }

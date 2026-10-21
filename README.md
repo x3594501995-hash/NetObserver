@@ -15,6 +15,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 - 枚举并选择 Windows 抓包网卡
 - 混杂模式捕获和 BPF 过滤
 - 捕获线程与界面线程分离
+- 捕获过滤与捕获后显示过滤分离
 - Ethernet、VLAN、IPv4、TCP、UDP、ARP、ICMP、IGMP 解析
 - HTTP 和 FTP 基础应用层识别
 - 数据包列表、协议字段、十六进制和统计信息
@@ -50,11 +51,30 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 
 1. 打开 `NetObserver.exe`。
 2. 选择当前正在联网的物理网卡，例如 `Realtek Wireless LAN`。
-3. 输入过滤器，例如 `icmp`、`arp`、`udp port 53` 或 `tcp port 80`。
+3. “BPF 捕获过滤”默认为空，表示捕获全部数据包。需要减少捕获量时可填写
+   `icmp`、`arp`、`udp port 53` 等 BPF 表达式。
 4. 点击“开始捕获”。
 5. 产生对应流量，然后点击“停止”。
+6. 在“显示过滤”中输入条件并点击“应用过滤”，只改变已经捕获的数据包列表，
+   不会重新抓包，也不会丢弃已捕获的数据。
 
 程序会在当前工作目录的 `captures` 文件夹中保存 `.pcap` 文件。
+
+显示过滤示例：
+
+```text
+icmp
+tcp and tcp.port == 80
+ip.addr == 192.168.1.10
+udp.port == 53 or dns
+http or arp
+frame.len > 100
+not arp
+```
+
+支持的显示过滤字段包括 `ip.addr`、`ip.src`、`ip.dst`、`tcp.port`、
+`udp.port`、`port`、`frame.len` 和 `protocol`，并支持 `and`、`or`、
+`not` 与括号。
 
 ## 已知限制
 

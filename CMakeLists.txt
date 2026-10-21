@@ -45,6 +45,7 @@ endif()
 
 add_library(netobserver_core STATIC
     src/core/CaptureEngine.cpp
+    src/core/DisplayFilter.cpp
     src/core/PacketParser.cpp
 )
 
@@ -103,5 +104,11 @@ if(BUILD_TESTING)
     )
     target_link_libraries(netobserver-tests PRIVATE netobserver_core)
     add_test(NAME netobserver_parser_tests COMMAND netobserver-tests)
+
+    add_executable(netobserver-filter-tests
+        tests/display_filter_tests.cpp
+    )
+    target_link_libraries(netobserver-filter-tests PRIVATE netobserver_core)
+    add_test(NAME netobserver_filter_tests COMMAND netobserver-filter-tests)
 endif()
 
