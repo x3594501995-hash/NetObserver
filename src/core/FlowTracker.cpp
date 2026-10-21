@@ -54,10 +54,12 @@ std::size_t printableCount(
 std::string renderText(
     const std::vector<std::uint8_t>& data,
     std::size_t begin,
-    std::size_t end)
+    std::size_t end,
+    bool fullContent)
 {
     constexpr std::size_t maximumTextBytes = 256U * 1024U;
-    end = std::min(end, begin + maximumTextBytes);
+    if (!fullContent)
+        end = std::min(end, begin + maximumTextBytes);
     std::string output;
     output.reserve(end - begin + 32);
     for (std::size_t index = begin; index < end; ++index) {
@@ -73,7 +75,7 @@ std::string renderText(
             output.push_back('.');
         }
     }
-    if (data.size() > maximumTextBytes && begin == 0)
+    if (!fullContent && data.size() > maximumTextBytes && begin == 0)
         output += "\r\n[文本已截断]";
     return output;
 }
@@ -135,7 +137,9 @@ std::string lowerPrefix(
     return output;
 }
 
-std::string renderStream(const std::vector<std::uint8_t>& data)
+std::string renderStream(
+    const std::vector<std::uint8_t>& data,
+    bool fullContent)
 {
     if (data.empty())
         return "[无数据]";
@@ -160,7 +164,7 @@ std::string renderStream(const std::vector<std::uint8_t>& data)
     }
 
     if (bodyStart != std::string::npos) {
-        std::string output = renderText(data, 0, bodyStart);
+        std::string output = renderText(data, 0, bodyStart, fullContent);
         output += "\r\n[响应体 " +
             std::to_string(data.size() - bodyStart) + " bytes]\r\n";
         const std::size_t printable =
@@ -174,24 +178,41 @@ std::string renderStream(const std::vector<std::uint8_t>& data)
             bodySize > 0 && printable * 100 / bodySize < 75;
         if (encoded || likelyBinary) {
             output +=
-                "[压缩或二进制内容，共 " +
+                (fullContent
+                    ? "[压缩或二进制响应体，显示完整十六进制，共 "
+                    : "[压缩或二进制内容，共 ") +
                 std::to_string(bodySize) +
-                " bytes；仅预览前 32 字节]\r\n";
-            output += hexPreview(data, bodyStart, data.size(), 32);
+                (fullContent
+                    ? " bytes]\r\n"
+                    : " bytes；仅预览前 32 字节]\r\n");
+            output += hexPreview(
+                data,
+                bodyStart,
+                data.size(),
+                fullContent ? bodySize : 32);
         } else {
-            output += renderText(data, bodyStart, data.size());
+            output += renderText(data, bodyStart, data.size(), fullContent);
         }
         return output;
     }
 
     const std::size_t printable = printableCount(data, 0, data.size());
     if (printable * 100 / data.size() >= 78)
-        return renderText(data, 0, data.size());
+        return renderText(data, 0, data.size(), fullContent);
 
-    return "[加密或二进制 TCP 载荷，共 " +
+    return
+        (fullContent
+            ? "[加密或二进制 TCP 载荷，显示完整十六进制，共 "
+            : "[加密或二进制 TCP 载荷，共 ") +
         std::to_string(data.size()) + " bytes]\r\n" +
-        "无法还原为可读文本，仅预览前 32 字节：\r\n" +
-        hexPreview(data, 0, data.size(), 32);
+        (fullContent
+            ? "完整原始字节：\r\n"
+            : "无法还原为可读文本，仅预览前 32 字节：\r\n") +
+        hexPreview(
+            data,
+            0,
+            data.size(),
+            fullContent ? data.size() : 32);
 }
 
 struct DirectionState {
@@ -399,7 +420,9 @@ std::vector<FlowStatistics> FlowTracker::statistics() const
     return result;
 }
 
-std::string FlowTracker::followStream(const std::string& key) const
+std::string FlowTracker::followStream(
+    const std::string& key,
+    bool fullContent) const
 {
     const auto iterator = impl_->flows.find(key);
     if (iterator == impl_->flows.end())
@@ -417,9 +440,9 @@ std::string FlowTracker::followStream(const std::string& key) const
     }
 
     output << "===== A -> B =====\r\n"
-           << renderStream(flow.aToB.stream)
+           << renderStream(flow.aToB.stream, fullContent)
            << "\r\n\r\n===== B -> A =====\r\n"
-           << renderStream(flow.bToA.stream)
+           << renderStream(flow.bToA.stream, fullContent)
            << "\r\n";
     return output.str();
 }

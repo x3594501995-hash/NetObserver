@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.5] - 2026-10-21
+
+### Added
+
+- Added a Full Stream action that renders all retained TCP payload bytes.
+- Added an explicit distinction between compact binary preview and full content.
+
 ## [0.2.4] - 2026-10-21
 
 ### Fixed

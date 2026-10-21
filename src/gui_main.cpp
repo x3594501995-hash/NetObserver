@@ -52,6 +52,7 @@ constexpr int kIdOpenPcap = 1021;
 constexpr int kIdFlowsEdit = 1022;
 constexpr int kIdFollowFlow = 1023;
 constexpr int kIdFilterFlow = 1024;
+constexpr int kIdFollowFull = 1025;
 
 constexpr UINT kMessageStarted = WM_APP + 1;
 constexpr UINT kMessageError = WM_APP + 2;
@@ -106,6 +107,7 @@ struct AppState {
     HWND applyFilterButton = nullptr;
     HWND followFlowButton = nullptr;
     HWND filterFlowButton = nullptr;
+    HWND fullFlowButton = nullptr;
     HWND tabs = nullptr;
     HWND detailsTree = nullptr;
     HWND hexEdit = nullptr;
@@ -576,7 +578,7 @@ const PacketRecord* selectedPacketRecord()
     return reinterpret_cast<const PacketRecord*>(item.lParam);
 }
 
-void showFollowStream()
+void showFollowStream(bool fullContent = false)
 {
     const PacketRecord* record = selectedPacketRecord();
     if (record) {
@@ -588,13 +590,18 @@ void showFollowStream()
         return;
     }
     const std::string follow =
-        g_app.flowTracker.followStream(g_app.selectedFlowKey);
+        g_app.flowTracker.followStream(
+            g_app.selectedFlowKey,
+            fullContent);
     SetWindowTextW(g_app.flowsEdit, utf8ToWide(follow).c_str());
     TabCtrl_SetCurSel(g_app.tabs, 2);
     setActiveTab(2);
     layoutControls(g_app.window);
     g_app.showingFollowStream = true;
-    setStatus(L"已显示当前数据包所属会话的 TCP 流");
+    setStatus(
+        fullContent
+            ? L"已显示当前 TCP 流的完整保留内容"
+            : L"已显示当前数据包所属会话的 TCP 流");
 }
 
 void filterCurrentFlow()
@@ -1102,31 +1109,35 @@ void layoutControls(HWND window)
         controlWidth, 32, SWP_NOZORDER);
 
     const int displayFilterY = contentTop;
-    const int applyButtonWidth = 82;
-    const int followButtonWidth = 96;
-    const int filterFlowButtonWidth = 86;
+    const int applyButtonWidth = 78;
+    const int followButtonWidth = 92;
+    const int filterFlowButtonWidth = 82;
+    const int fullFlowButtonWidth = 88;
+    const int fullX = rightX + rightWidth - fullFlowButtonWidth;
+    const int followX = fullX - followButtonWidth - 6;
+    const int filterFlowX = followX - filterFlowButtonWidth - 6;
+    const int applyX = filterFlowX - applyButtonWidth - 6;
     SetWindowPos(
         g_app.displayFilterEdit, nullptr,
         rightX + 70, displayFilterY,
-        std::max(
-            140,
-            rightWidth - 70 - applyButtonWidth - followButtonWidth -
-                filterFlowButtonWidth - 18),
+        std::max(140, applyX - (rightX + 70) - 6),
         28,
         SWP_NOZORDER);
     SetWindowPos(
         g_app.filterFlowButton, nullptr,
-        rightX + rightWidth - followButtonWidth - applyButtonWidth -
-            filterFlowButtonWidth - 12,
+        filterFlowX,
         displayFilterY, filterFlowButtonWidth, 28, SWP_NOZORDER);
     SetWindowPos(
         g_app.applyFilterButton, nullptr,
-        rightX + rightWidth - followButtonWidth - applyButtonWidth - 6,
+        applyX,
         displayFilterY, applyButtonWidth, 28, SWP_NOZORDER);
     SetWindowPos(
         g_app.followFlowButton, nullptr,
-        rightX + rightWidth - followButtonWidth,
+        followX,
         displayFilterY, followButtonWidth, 28, SWP_NOZORDER);
+    SetWindowPos(
+        g_app.fullFlowButton, nullptr,
+        fullX, displayFilterY, fullFlowButtonWidth, 28, SWP_NOZORDER);
 
     const int listTop = contentTop + 36;
     const int remainingHeight = contentBottom - listTop;
@@ -1175,7 +1186,7 @@ void createHeader(HWND window, HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 10, 260, 30, window, nullptr, instance, nullptr);
     g_app.subtitle = CreateWindowExW(
-        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.4",
+        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.5",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 39, 460, 18, window, nullptr, instance, nullptr);
     g_app.state = CreateWindowExW(
@@ -1282,6 +1293,10 @@ void createControls(HWND window)
         0, L"BUTTON", L"仅此会话",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP,
         988, 76, 86, 28, window, controlId(kIdFilterFlow), instance, nullptr);
+    g_app.fullFlowButton = CreateWindowExW(
+        0, L"BUTTON", L"完整流",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP,
+        1190, 76, 88, 28, window, controlId(kIdFollowFull), instance, nullptr);
 
     g_app.packetList = CreateWindowExW(
         WS_EX_CLIENTEDGE, WC_LISTVIEWW, nullptr,
@@ -1326,6 +1341,7 @@ void createControls(HWND window)
     SetWindowFont(g_app.applyFilterButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.followFlowButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.filterFlowButton, g_app.uiFont, TRUE);
+    SetWindowFont(g_app.fullFlowButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.refreshButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.openButton, g_app.uiFont, TRUE);
     SetWindowFont(g_app.clearButton, g_app.uiFont, TRUE);
@@ -1511,6 +1527,10 @@ LRESULT CALLBACK windowProcedure(
         }
         if (id == kIdFollowFlow) {
             showFollowStream();
+            return 0;
+        }
+        if (id == kIdFollowFull) {
+            showFollowStream(true);
             return 0;
         }
         if (id == kIdFilterFlow) {

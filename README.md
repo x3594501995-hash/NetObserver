@@ -8,7 +8,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 
 ## 版本
 
-当前版本：`0.2.4`
+当前版本：`0.2.5`
 
 ## 功能
 
@@ -59,7 +59,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 .\scripts\package-release.ps1
 ```
 
-输出位于 `dist\NetObserver-v0.2.4-win64.zip`，同时生成 SHA256 校验文件。
+输出位于 `dist\NetObserver-v0.2.5-win64.zip`，同时生成 SHA256 校验文件。
 
 ## 使用
 
@@ -87,6 +87,9 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 
 选择一个 TCP 数据包后，点击“跟随当前流”可以查看双向 TCP 重组内容。
 “仅此会话”会自动生成对应的地址和端口显示过滤器。
+
+“完整流”会显示当前 TCP 流中保留的全部载荷。二进制内容将输出完整十六进制；
+为避免界面卡顿，单方向当前最多保留 1 MB。
 
 程序会在当前工作目录的 `captures` 文件夹中保存 `.pcap` 文件。
 

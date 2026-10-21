@@ -38,7 +38,9 @@ public:
 
     static std::string flowKey(const ParsedPacket& packet);
     std::vector<FlowStatistics> statistics() const;
-    std::string followStream(const std::string& key) const;
+    std::string followStream(
+        const std::string& key,
+        bool fullContent = false) const;
 
 private:
     struct Impl;

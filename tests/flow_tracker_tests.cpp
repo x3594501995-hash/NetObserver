@@ -88,8 +88,11 @@ int main()
     const auto encodedFlows = encodedTracker.statistics();
     const std::string encodedStream =
         encodedTracker.followStream(encodedFlows[0].key);
+    const std::string fullEncodedStream =
+        encodedTracker.followStream(encodedFlows[0].key, true);
     if (encodedStream.find("压缩或二进制内容") == std::string::npos ||
-        encodedStream.find("1F 8B") == std::string::npos) {
+        encodedStream.find("1F 8B") == std::string::npos ||
+        fullEncodedStream.size() <= encodedStream.size()) {
         std::cerr << "compressed stream rendering mismatch:\n"
                   << encodedStream << "\n";
         return 1;
