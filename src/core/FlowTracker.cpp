@@ -173,8 +173,11 @@ std::string renderStream(const std::vector<std::uint8_t>& data)
         const bool likelyBinary =
             bodySize > 0 && printable * 100 / bodySize < 75;
         if (encoded || likelyBinary) {
-            output += "[压缩或二进制内容，显示十六进制预览]\r\n";
-            output += hexPreview(data, bodyStart, data.size());
+            output +=
+                "[压缩或二进制内容，共 " +
+                std::to_string(bodySize) +
+                " bytes；仅预览前 32 字节]\r\n";
+            output += hexPreview(data, bodyStart, data.size(), 32);
         } else {
             output += renderText(data, bodyStart, data.size());
         }
@@ -185,9 +188,10 @@ std::string renderStream(const std::vector<std::uint8_t>& data)
     if (printable * 100 / data.size() >= 78)
         return renderText(data, 0, data.size());
 
-    return "[二进制或加密封装数据，共 " +
+    return "[加密或二进制 TCP 载荷，共 " +
         std::to_string(data.size()) + " bytes]\r\n" +
-        hexPreview(data, 0, data.size());
+        "无法还原为可读文本，仅预览前 32 字节：\r\n" +
+        hexPreview(data, 0, data.size(), 32);
 }
 
 struct DirectionState {

@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.4] - 2026-10-21
+
+### Fixed
+
+- Follow Stream no longer dumps long encrypted or compressed data as character
+  noise.
+- Binary TCP payloads show a clear explanation and a fixed 32-byte hex preview.
+- Follow Stream uses Rich Edit for stable long-text scrolling.
+
 ## [0.2.3] - 2026-10-21
 
 ### Fixed

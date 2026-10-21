@@ -62,11 +62,14 @@ int main(int argc, char* argv[])
     std::string requestedFilter;
     std::string readFile;
     bool listOnly = false;
+    bool followFirstFlow = false;
 
     for (int index = 1; index < argc; ++index) {
         const std::string argument = argv[index];
         if (argument == "--list") {
             listOnly = true;
+        } else if (argument == "--follow") {
+            followFirstFlow = true;
         } else if (argument == "--read" && index + 1 < argc) {
             readFile = argv[++index];
         } else if (argument == "--adapter" && index + 1 < argc) {
@@ -132,6 +135,8 @@ int main(int argc, char* argv[])
                       << "  " << flow.packetsAToB + flow.packetsBToA
                       << " 包\n";
         }
+        if (followFirstFlow && !statistics.empty())
+            std::cout << "\n" << flows.followStream(statistics[0].key);
         return 0;
     }
 

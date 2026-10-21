@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <commctrl.h>
 #include <commdlg.h>
+#include <richedit.h>
 #include <shellapi.h>
 #include <windowsx.h>
 
@@ -1174,7 +1175,7 @@ void createHeader(HWND window, HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 10, 260, 30, window, nullptr, instance, nullptr);
     g_app.subtitle = CreateWindowExW(
-        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.3",
+        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.4",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 39, 460, 18, window, nullptr, instance, nullptr);
     g_app.state = CreateWindowExW(
@@ -1301,7 +1302,7 @@ void createControls(HWND window)
             ES_AUTOVSCROLL | ES_AUTOHSCROLL | WS_VSCROLL | WS_HSCROLL,
         304, 446, 950, 250, window, controlId(kIdHex), instance, nullptr);
     g_app.flowsEdit = CreateWindowExW(
-        WS_EX_CLIENTEDGE, L"EDIT", nullptr,
+        WS_EX_CLIENTEDGE, MSFTEDIT_CLASS, nullptr,
         WS_CHILD | WS_TABSTOP | ES_MULTILINE | ES_READONLY |
             ES_AUTOVSCROLL | ES_AUTOHSCROLL | WS_VSCROLL | WS_HSCROLL,
         304, 446, 950, 250, window, controlId(kIdFlowsEdit), instance, nullptr);
@@ -1669,6 +1670,7 @@ LRESULT CALLBACK windowProcedure(
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
+    LoadLibraryW(L"Msftedit.dll");
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     INITCOMMONCONTROLSEX commonControls{};
     commonControls.dwSize = sizeof(commonControls);
