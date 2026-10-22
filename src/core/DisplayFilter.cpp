@@ -296,11 +296,57 @@ private:
         if (current().type != TokenType::Word)
             fail("此处需要一个协议或字段");
 
-        const std::string field = lower(current().text);
+        std::string field = lower(current().text);
         ++index_;
 
         auto node = std::make_shared<DisplayFilter::Node>();
-        if (current().type != TokenType::Equal &&
+        bool shorthand = false;
+        if ((field == "tcp" || field == "udp") &&
+            current().type == TokenType::Word &&
+            lower(current().text) == "port") {
+            ++index_;
+            if (current().type != TokenType::Word)
+                fail("port 后缺少端口号");
+            field += ".port";
+            node->type = DisplayFilter::Node::Type::Compare;
+            node->field = field;
+            node->operation = TokenType::Equal;
+            node->value = current().text;
+            ++index_;
+            shorthand = true;
+        } else if (field == "port" && current().type == TokenType::Word) {
+            node->type = DisplayFilter::Node::Type::Compare;
+            node->field = field;
+            node->operation = TokenType::Equal;
+            node->value = current().text;
+            ++index_;
+            shorthand = true;
+        } else if (field == "host" && current().type == TokenType::Word) {
+            field = "ip.addr";
+            node->type = DisplayFilter::Node::Type::Compare;
+            node->field = field;
+            node->operation = TokenType::Equal;
+            node->value = current().text;
+            ++index_;
+            shorthand = true;
+        } else if (
+            (field == "src" || field == "dst") &&
+            current().type == TokenType::Word &&
+            lower(current().text) == "host") {
+            field = field == "src" ? "ip.src" : "ip.dst";
+            ++index_;
+            if (current().type != TokenType::Word)
+                fail("host 后缺少地址");
+            node->type = DisplayFilter::Node::Type::Compare;
+            node->field = field;
+            node->operation = TokenType::Equal;
+            node->value = current().text;
+            ++index_;
+            shorthand = true;
+        }
+
+        if (!shorthand &&
+            current().type != TokenType::Equal &&
             current().type != TokenType::NotEqual &&
             current().type != TokenType::Greater &&
             current().type != TokenType::GreaterEqual &&
@@ -320,15 +366,17 @@ private:
             return node;
         }
 
-        node->type = DisplayFilter::Node::Type::Compare;
-        node->field = field;
-        node->operation = current().type;
-        ++index_;
+        if (!shorthand) {
+            node->type = DisplayFilter::Node::Type::Compare;
+            node->field = field;
+            node->operation = current().type;
+            ++index_;
 
-        if (current().type != TokenType::Word)
-            fail("比较运算符后缺少值");
-        node->value = current().text;
-        ++index_;
+            if (current().type != TokenType::Word)
+                fail("比较运算符后缺少值");
+            node->value = current().text;
+            ++index_;
+        }
 
         static const std::vector<std::string> supportedFields = {
             "ip.addr", "ip.src", "ip.dst", "tcp.port", "udp.port",

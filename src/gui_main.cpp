@@ -1196,7 +1196,7 @@ void createHeader(HWND window, HINSTANCE instance)
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 10, 260, 30, window, nullptr, instance, nullptr);
     g_app.subtitle = CreateWindowExW(
-        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.8",
+        0, L"STATIC", L"Windows Network Protocol Analyzer  ·  v0.2.9",
         WS_CHILD | WS_VISIBLE | SS_LEFT,
         20, 39, 460, 18, window, nullptr, instance, nullptr);
     g_app.state = CreateWindowExW(
@@ -1366,6 +1366,16 @@ void createControls(HWND window)
     SetWindowFont(g_app.detailsTree, g_app.uiFont, TRUE);
     SetWindowFont(g_app.hexEdit, g_app.monoFont, TRUE);
     SetWindowFont(g_app.flowsEdit, g_app.monoFont, TRUE);
+    SendMessageW(
+        g_app.filterEdit,
+        EM_SETCUEBANNER,
+        TRUE,
+        reinterpret_cast<LPARAM>(L"BPF，例如 tcp port 8080"));
+    SendMessageW(
+        g_app.displayFilterEdit,
+        EM_SETCUEBANNER,
+        TRUE,
+        reinterpret_cast<LPARAM>(L"例如 tcp.port == 8080 或 http"));
     SendMessageW(
         g_app.hexEdit,
         EM_EXLIMITTEXT,

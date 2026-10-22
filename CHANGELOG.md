@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.2.9] - 2026-10-21
+
+### Added
+
+- Display filters accept BPF-style shorthands such as `tcp port 8080`,
+  `udp port 53`, `port 80`, and `host 192.168.1.10`.
+- Capture and display filter inputs show syntax cue banners while empty.
+
+### Changed
+
+- Clarified that `tcp port 8080` includes every packet in the TCP connection,
+  while `http` includes only successfully parsed HTTP messages.
+
 ## [0.2.8] - 2026-10-21
 
 ### Fixed

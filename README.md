@@ -8,7 +8,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 
 ## 版本
 
-当前版本：`0.2.8`
+当前版本：`0.2.9`
 
 ## 功能
 
@@ -59,7 +59,7 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 .\scripts\package-release.ps1
 ```
 
-输出位于 `dist\NetObserver-v0.2.8-win64.zip`，同时生成 SHA256 校验文件。
+输出位于 `dist\NetObserver-v0.2.9-win64.zip`，同时生成 SHA256 校验文件。
 
 ## 使用
 
@@ -102,7 +102,9 @@ NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使�
 ```text
 icmp
 tcp and tcp.port == 80
+tcp port 8080
 ip.addr == 192.168.1.10
+host 192.168.1.10
 udp.port == 53 or dns
 http or arp
 frame.len > 100
@@ -112,6 +114,11 @@ not arp
 支持的显示过滤字段包括 `ip.addr`、`ip.src`、`ip.dst`、`tcp.port`、
 `udp.port`、`port`、`frame.len` 和 `protocol`，并支持 `and`、`or`、
 `not` 与括号。
+
+显示过滤同时兼容 `tcp port 8080`、`udp port 53`、`port 80`、
+`host 192.168.1.10` 和 `src host 192.168.1.10` 等简写。
+`tcp port 8080` 会显示该端口的全部 TCP 连接包，包括握手；
+`http` 只显示成功解析出 HTTP 请求或响应的数据包。
 
 此外还支持 `ipv6.addr`、`ipv6.src`、`ipv6.dst`、`dns.id`、
 `dns.qry.name`、`http.request.method`、`http.request.uri`、`http.host`

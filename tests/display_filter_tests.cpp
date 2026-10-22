@@ -96,6 +96,11 @@ int main()
             "tcp and ip.src == 192.168.1.10 and tcp.port == 8080",
             http),
         "combined field filter");
+    check(matches("tcp port 8080", http), "BPF-style TCP port shorthand");
+    check(matches("udp port 53", dns), "BPF-style UDP port shorthand");
+    check(matches("port 53", dns), "port shorthand");
+    check(matches("host 8.8.8.8", dns), "host shorthand");
+    check(matches("src host 192.168.1.10", http), "src host shorthand");
     check(
         matches("udp.port == 53 or icmp", dns),
         "logical OR filter");
