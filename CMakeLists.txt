@@ -118,24 +118,38 @@ if(BUILD_TESTING)
     target_link_libraries(netobserver-filter-tests PRIVATE netobserver_core)
     add_test(NAME netobserver_filter_tests COMMAND netobserver-filter-tests)
 
-    add_executable(netobserver-offline-tests
-        tests/offline_capture_tests.cpp
-    )
-    target_link_libraries(netobserver-offline-tests PRIVATE netobserver_core)
-    add_test(NAME netobserver_offline_tests COMMAND netobserver-offline-tests)
-    set_tests_properties(netobserver_offline_tests PROPERTIES SKIP_RETURN_CODE 77)
-
     add_executable(netobserver-flow-tests
         tests/flow_tracker_tests.cpp
     )
     target_link_libraries(netobserver-flow-tests PRIVATE netobserver_core)
     add_test(NAME netobserver_flow_tests COMMAND netobserver-flow-tests)
 
-    add_executable(netobserver-bpf-tests
-        tests/bpf_filter_tests.cpp
+    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+        set(_runtime_hint "$ENV{SystemRoot}/System32")
+    else()
+        set(_runtime_hint "$ENV{SystemRoot}/SysWOW64")
+    endif()
+
+    find_file(WPCAP_RUNTIME_DLL
+        NAMES wpcap.dll
+        HINTS "${_runtime_hint}"
     )
-    target_link_libraries(netobserver-bpf-tests PRIVATE netobserver_core)
-    add_test(NAME netobserver_bpf_tests COMMAND netobserver-bpf-tests)
-    set_tests_properties(netobserver_bpf_tests PROPERTIES SKIP_RETURN_CODE 77)
+
+    if(WPCAP_RUNTIME_DLL)
+        add_executable(netobserver-offline-tests
+            tests/offline_capture_tests.cpp
+        )
+        target_link_libraries(netobserver-offline-tests PRIVATE netobserver_core)
+        add_test(NAME netobserver_offline_tests COMMAND netobserver-offline-tests)
+
+        add_executable(netobserver-bpf-tests
+            tests/bpf_filter_tests.cpp
+        )
+        target_link_libraries(netobserver-bpf-tests PRIVATE netobserver_core)
+        add_test(NAME netobserver_bpf_tests COMMAND netobserver-bpf-tests)
+    else()
+        message(STATUS
+            "wpcap.dll not found; skipping offline-file and BPF runtime tests")
+    endif()
 endif()
 
