@@ -8,6 +8,8 @@
 
 #include <pcap.h>
 
+#include <windows.h>
+
 #include <iostream>
 #include <string>
 
@@ -31,6 +33,12 @@ bool compiles(pcap_t* handle, const std::string& expression)
 
 int main()
 {
+    HMODULE runtime = LoadLibraryW(L"wpcap.dll");
+    if (!runtime) {
+        std::cout << "SKIP: wpcap.dll is not available\n";
+        return 77;
+    }
+
     pcap_t* handle = pcap_open_dead(DLT_EN10MB, 65535);
     if (!handle) {
         std::cerr << "pcap_open_dead failed\n";
@@ -71,5 +79,6 @@ int main()
 
     pcap_close(handle);
     std::cout << "BPF filter tests passed\n";
+    FreeLibrary(runtime);
     return 0;
 }

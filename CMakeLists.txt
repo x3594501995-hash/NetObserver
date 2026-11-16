@@ -123,6 +123,7 @@ if(BUILD_TESTING)
     )
     target_link_libraries(netobserver-offline-tests PRIVATE netobserver_core)
     add_test(NAME netobserver_offline_tests COMMAND netobserver-offline-tests)
+    set_tests_properties(netobserver_offline_tests PROPERTIES SKIP_RETURN_CODE 77)
 
     add_executable(netobserver-flow-tests
         tests/flow_tracker_tests.cpp
@@ -135,5 +136,6 @@ if(BUILD_TESTING)
     )
     target_link_libraries(netobserver-bpf-tests PRIVATE netobserver_core)
     add_test(NAME netobserver_bpf_tests COMMAND netobserver-bpf-tests)
+    set_tests_properties(netobserver_bpf_tests PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 

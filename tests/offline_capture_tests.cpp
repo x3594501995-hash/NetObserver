@@ -12,6 +12,8 @@
 
 #include <pcap.h>
 
+#include <windows.h>
+
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -40,6 +42,12 @@ std::vector<std::uint8_t> makePacket()
 
 int main()
 {
+    HMODULE runtime = LoadLibraryW(L"wpcap.dll");
+    if (!runtime) {
+        std::cout << "SKIP: wpcap.dll is not available\n";
+        return 77;
+    }
+
     const std::string fileName =
         "netobserver_offline_test_" +
         std::to_string(
@@ -162,5 +170,6 @@ int main()
     }
 
     std::cout << "Offline capture test passed\n";
+    FreeLibrary(runtime);
     return 0;
 }
