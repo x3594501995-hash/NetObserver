@@ -1,5 +1,8 @@
 # NetObserver
 
+> **注意：** 本项目是受 Wireshark 启发、使用 AI 辅助开发的简易网络协议分析器，与 Wireshark 官方无关，也不应视为 Wireshark 的替代品。  
+> 项目欢迎学习和二创；公开转载或基于本项目继续开发时，请尽量注明项目名称、原始仓库和作者出处，顺便点个 Star 支持一下。
+
 NetObserver 是一个面向 Windows 的网络协议分析器实验项目，使用 C++17、Win32 GUI 和 Npcap 开发。
 
 <img src="docs/icon-preview.png" alt="NetObserver icon" width="96">
